@@ -37,6 +37,12 @@ block extendSym:
     ttyCssString
     ttyResolution
     ttyFlex
+    ttyCssVar
+    ttyTransform
+    ttyFilter
+    ttyImage
+    ttyShape
+    ttyEasing
 block extendCodeGen:
   extendModule "vancode" / "interpreter" / "codegen.nim":
     import std/strutils
@@ -45,10 +51,147 @@ block extendCodeGen:
 
     var nestingParent: string = "" ## Sass-style nesting: parent selector context for & substitution
     var mixinTable = initTable[string, Node]() ## registered mixin definitions (name -> nkMixinDef)
+    type CustomPropEntry = object
+      ## Registered type info for a `--x` custom property declaration.
+      ## Concrete kinds enable use-site checking of `var(--x)`; aliases
+      ## resolve lazily (bro `$var` via scope lookup, chained `var(--y)`
+      ## recursively); unjudgeable shapes stay silent-but-declared.
+      case hasKind: bool
+      of true:
+        kind: TypeKind
+      of false:
+        alias: string # "$var", "var(--other)", or "" (unjudgeable)
+    var customPropTable = initTable[string, CustomPropEntry]()
+    proc resetCustomProps*() =
+      ## Clear the custom-property registry (fresh compile / test isolation).
+      customPropTable.clear()
+    proc unitSuffixKind(suffix: string): tuple[ok: bool, kind: TypeKind] =
+      ## Mirror genUnit's suffix mapping so declarations infer the same type
+      ## the value would inhabit at runtime.
+      case suffix
+      of "px", "em", "rem", "%", "vh", "vw", "vmin", "vmax",
+         "ch", "ex", "cm", "mm", "in", "pt", "pc":
+        (true, ttyLength)
+      of "deg", "rad", "grad", "turn":
+        (true, ttyAngle)
+      of "s", "ms":
+        (true, ttyTime)
+      of "dpi", "dpcm", "dppx":
+        (true, ttyResolution)
+      of "fr":
+        (true, ttyFlex)
+      else:
+        (false, ttyKeyword)
+    proc broCallReturnKind(name: string): tuple[ok: bool, kind: TypeKind] =
+      ## Statically known return kinds of stdlib value functions.
+      case name
+      of "lighten", "darken", "saturate", "desaturate", "spin", "mix",
+         "mixCMYK", "parseHex", "parseHexAlpha", "parseHtmlHex",
+         "parseColor", "parseHtmlName", "parseHtmlColor":
+        (true, ttyColor)
+      of "parseLength":
+        (true, ttyLength)
+      of "parseAngle":
+        (true, ttyAngle)
+      of "parseTime":
+        (true, ttyTime)
+      of "parseResolution":
+        (true, ttyResolution)
+      of "parseFlex":
+        (true, ttyFlex)
+      of "translate3d", "translate", "translateX", "translateY",
+         "translateZ", "scale", "scaleX", "scaleY", "scaleZ", "scale3d",
+         "rotate", "rotateX", "rotateY", "rotateZ", "rotate3d", "skew",
+         "skewX", "skewY", "matrix", "matrix3d", "perspective":
+        (true, ttyTransform)
+      # NOTE: no "saturate" here: that label is taken by libcolors'
+      # saturate(color, amount) -> ttyColor above. The CSS filter
+      # saturate(amount) coexists at runtime as a 1-arg overload
+      # (arity-disjoint); static inference keeps the color kind.
+      of "blur", "brightness", "contrast", "grayscale", "invert", "opacity",
+         "sepia", "hue-rotate", "drop-shadow":
+        (true, ttyFilter)
+      of "linear-gradient", "repeating-linear-gradient",
+         "radial-gradient", "repeating-radial-gradient", "conic-gradient",
+         "repeating-conic-gradient":
+        (true, ttyImage)
+      of "circle", "ellipse", "inset", "polygon", "path", "xywh", "ray":
+        (true, ttyShape)
+      of "cubic-bezier", "steps", "linear":
+        (true, ttyEasing)
+      of "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab",
+         "oklch", "color", "light-dark", "color-mix":
+        (true, ttyColor)
+      of "image", "image-set":
+        (true, ttyImage)
+      else:
+        (false, ttyKeyword)
+    proc inferCustomPropType(v: Node): CustomPropEntry =
+      ## Infer a declaration value's type from its AST shape (no codegen).
+      case v.kind
+      of nkUnit:
+        if v.len > 1 and v[1].kind == nkIdent:
+          let sk = unitSuffixKind(v[1].ident)
+          if sk.ok: return CustomPropEntry(hasKind: true, kind: sk.kind)
+        CustomPropEntry(hasKind: false, alias: "")
+      of nkColor:
+        CustomPropEntry(hasKind: true, kind: ttyColor)
+      of nkInt, nkFloat:
+        CustomPropEntry(hasKind: true, kind: ttyNumber)
+      of nkString:
+        CustomPropEntry(hasKind: true, kind: ttyCssString)
+      of nkIdent:
+        if v.ident.len > 0 and v.ident[0] == '$':
+          CustomPropEntry(hasKind: false, alias: v.ident)
+        elif v.ident.startsWith("var("):
+          CustomPropEntry(hasKind: false, alias: v.ident)
+        else:
+          # Keywords (auto, inherit, transparent, ...) are property-specific;
+          # judging them needs cascade context, so they stay unjudgeable.
+          CustomPropEntry(hasKind: false, alias: "")
+      of nkCall:
+        if v.len > 0 and v[0].kind == nkIdent:
+          # var(--other) declarations chain through the registry
+          if v[0].ident == "var" and v.len > 1 and v[1].kind == nkString:
+            return CustomPropEntry(hasKind: false,
+              alias: "var(" & v[1].stringVal & ")")
+          let rk = broCallReturnKind(v[0].ident)
+          if rk.ok: return CustomPropEntry(hasKind: true, kind: rk.kind)
+        CustomPropEntry(hasKind: false, alias: "")
+      else: # compounds, nil, postfix: unjudgeable
+        CustomPropEntry(hasKind: false, alias: "")
+    proc collectCustomProps*(program: Ast) =
+      ## Pre-pass: register every `--x: value` declaration in a module AST
+      ## (entry file and each import). Order-independent, last wins; selector
+      ## and media scoping is intentionally ignored (global approximation).
+      proc walk(n: Node) =
+        if n.kind == nkColon and n.len > 1:
+          let k = n[0]
+          let name =
+            if k.kind == nkIdent: k.ident
+            elif k.kind == nkString: k.stringVal
+            else: ""
+          if name.len > 2 and name[0] == '-' and name[1] == '-':
+            customPropTable[name] = inferCustomPropType(n[1])
+        # Leaf nodes (nkEmpty..nkIdent) carry no children field.
+        if n.kind notin {nkEmpty .. nkIdent}:
+          for c in n.children:
+            walk(c)
+      for n in program.nodes:
+        walk(n)
+    var strictCss* = false
+    ## When true, the static CSS type system runs: use-site checks of
+    ## dynamic values against property syntax (checkPropValueType, incl.
+    ## var() registry checks and unknown-var warnings), static literal
+    ## validation (cssValidateProp), and invalid-color errors. When false
+    ## only VM/JIT types apply (vancode vars, fn params, stdlib signatures);
+    ## rendering (incl. named-color normalization) is identical either way.
+    ## Set per compile by the CLI (`--strict`) or embed API.
     var rawPropMode = false ## when true, properties emit as raw text (for if/for inside rules)
     ## Optional hook for reporting non-fatal codegen warnings; when unset,
     ## warnings go to stderr with a `[warn]` prefix. The CLI layer installs
-    ## a handler that routes messages through kapsis `displayWarning`.
+    ## a handler that collects messages and flushes them via kapsis
+    ## `displayWarning` once the command finishes.
     var warnHandler*: proc(msg: string) {.gcsafe.}
 
     proc codegenWarn(file: string, ln, col: int, msg: string) =
@@ -161,9 +304,19 @@ block extendCodeGen:
             inc j
           let word = raw[i ..< j]
           let hex = tryNamedToHex(word)
+          # Convert only standalone words: a run touching identifier chars,
+          # hyphens, hashes or `$` is part of a larger ident (custom property
+          # names like --color-gray, dimensions like gray100, hashes like
+          # #red) and must stay verbatim. A real named color is always
+          # delimited by whitespace, comma, paren, slash or string bounds.
+          let beforeIdent = i > 0 and raw[i - 1] in {'A'..'Z', 'a'..'z',
+            '0'..'9', '-', '_', '#', '$'}
+          let afterIdent = j < raw.len and raw[j] in {'A'..'Z', 'a'..'z',
+            '0'..'9', '-', '_'}
           # Avoid converting function names (followed by '(') — e.g. `red`
           # is never a function name, but guard for future color functions.
-          if hex.len > 0 and not (j < raw.len and raw[j] == '('):
+          if hex.len > 0 and not beforeIdent and not afterIdent and
+              not (j < raw.len and raw[j] == '('):
             result.add(hex)
           else:
             result.add(word)
@@ -184,6 +337,11 @@ block extendCodeGen:
       of "resolution": ttyResolution
       of "flex": ttyFlex
       of "string": ttyCssString
+      of "transform-list": ttyTransform
+      of "filter-value-list": ttyFilter
+      of "image", "bg-image", "gradient": ttyImage
+      of "basic-shape", "offset-path": ttyShape
+      of "easing-function": ttyEasing
       else: ttyKeyword
 
     proc cssKindName(k: TypeKind): string =
@@ -197,12 +355,18 @@ block extendCodeGen:
       of ttyResolution: "resolution"
       of ttyFlex: "flex"
       of ttyCssString: "string"
+      of ttyCssVar: "css-var"
+      of ttyTransform: "transform"
+      of ttyFilter: "filter"
+      of ttyImage: "image"
+      of ttyShape: "shape"
+      of ttyEasing: "easing"
       else: "keyword"
 
     proc isBroCall(node: Node): bool {.codegen.} =
       ## True when node calls a known bro foreign proc (lighten, mix,
-      ## parseLength, parseColor, ...) rather than a raw CSS function
-      ## (linear-gradient, rgb, var, calc). Bro calls evaluate to strictly
+      ## parseLength, parseColor, var, ...) rather than a raw CSS function
+      ## (linear-gradient, rgb, calc). Bro calls evaluate to strictly
       ## typed runtime values; raw CSS calls stay verbatim text.
       if node.kind != nkCall or node.len == 0 or node[0].kind != nkIdent:
         return false
@@ -210,10 +374,14 @@ block extendCodeGen:
       result = s != nil and s.kind in {skProc, skChoice}
 
     proc collectAcceptedKinds(node: cssmod.SyntaxNode,
-        acc: var seq[TypeKind], unknown: var bool) =
+        acc: var seq[TypeKind], unknown: var bool,
+        visited: var seq[string]) =
       ## Walk a CSS syntax tree collecting the value kinds a property accepts.
       ## unknown=true means the syntax has parts we cannot judge (functions,
-      ## refs, exotic component types) — the check then accepts everything.
+      ## token refs, exotic component types) — the check then accepts everything.
+      ## Data refs (`<font-weight-absolute>`, `<'foo'>`) resolve through the
+      ## syntax table with a cycle guard, so real alternatives count instead
+      ## of silently narrowing the accepted set (e.g. font-weight numbers).
       if node == nil:
         unknown = true
         return
@@ -231,39 +399,53 @@ block extendCodeGen:
         of "flex": acc.add(ttyFlex)
         of "url": acc.add(ttyUrl)
         of "string": acc.add(ttyCssString)
-        else: unknown = true
+        of "transform-list": acc.add(ttyTransform)
+        of "filter-value-list": acc.add(ttyFilter)
+        of "image", "bg-image", "gradient": acc.add(ttyImage)
+        of "basic-shape", "offset-path": acc.add(ttyShape)
+        of "easing-function": acc.add(ttyEasing)
+        else:
+          if node.cssType notin visited:
+            visited.add(node.cssType)
+            let sub = cssmod.resolveType(cssData, node.cssType)
+            if sub != nil:
+              collectAcceptedKinds(sub, acc, unknown, visited)
+            else:
+              unknown = true
+      of skPropertyRef:
+        # `<'prop'>` means "same syntax as that property": resolve through
+        # the syntax table first, then the property table (background-color
+        # lives only there). Unresolvable refs stay unknown.
+        if node.propRef notin visited:
+          visited.add(node.propRef)
+          var sub = cssmod.resolveType(cssData, node.propRef)
+          if sub == nil:
+            sub = cssGetPropertySyntax(node.propRef)
+          if sub != nil:
+            collectAcceptedKinds(sub, acc, unknown, visited)
+          else:
+            unknown = true
       of skKeyword: acc.add(ttyKeyword)
       of skNumeric: acc.add(ttyNumber)
       of skString: acc.add(ttyCssString)
-      of skAlternatives: (for c in node.alternatives: collectAcceptedKinds(c, acc, unknown))
-      of skAtLeastOne: (for c in node.options: collectAcceptedKinds(c, acc, unknown))
-      of skAll: (for c in node.required: collectAcceptedKinds(c, acc, unknown))
-      of skJuxtapose: (for c in node.sequence: collectAcceptedKinds(c, acc, unknown))
-      of skGroup: collectAcceptedKinds(node.group, acc, unknown)
-      of skOptional: collectAcceptedKinds(node.optionalInner, acc, unknown)
-      of skZeroOrMore: collectAcceptedKinds(node.starInner, acc, unknown)
-      of skOneOrMore: collectAcceptedKinds(node.plusInner, acc, unknown)
-      of skCommaSep: collectAcceptedKinds(node.hashInner, acc, unknown)
-      of skRequired: collectAcceptedKinds(node.bangInner, acc, unknown)
-      of skMulti: collectAcceptedKinds(node.multiInner, acc, unknown)
-      else: unknown = true # functions, refs, delims: cannot judge statically
+      of skAlternatives: (for c in node.alternatives: collectAcceptedKinds(c, acc, unknown, visited))
+      of skAtLeastOne: (for c in node.options: collectAcceptedKinds(c, acc, unknown, visited))
+      of skAll: (for c in node.required: collectAcceptedKinds(c, acc, unknown, visited))
+      of skJuxtapose: (for c in node.sequence: collectAcceptedKinds(c, acc, unknown, visited))
+      of skGroup: collectAcceptedKinds(node.group, acc, unknown, visited)
+      of skOptional: collectAcceptedKinds(node.optionalInner, acc, unknown, visited)
+      of skZeroOrMore: collectAcceptedKinds(node.starInner, acc, unknown, visited)
+      of skOneOrMore: collectAcceptedKinds(node.plusInner, acc, unknown, visited)
+      of skCommaSep: collectAcceptedKinds(node.hashInner, acc, unknown, visited)
+      of skRequired: collectAcceptedKinds(node.bangInner, acc, unknown, visited)
+      of skMulti: collectAcceptedKinds(node.multiInner, acc, unknown, visited)
+      else: unknown = true # functions, token refs, delims: cannot judge statically
 
-    proc checkPropValueType(key: string, valTy: Sym, errNode: Node) =
-      ## Static type check for dynamic property values (vars, bro calls,
-      ## infix). Literals are validated as text elsewhere; strings and other
-      ## shapes stay legacy-lenient. Mismatched CSS value types are hard errors
-      ## (e.g. `width: $colorVar` or `color: $lengthVar`).
-      if valTy == nil: return
-      var kinds: seq[TypeKind]
-      var unknown = false
-      collectAcceptedKinds(cssGetPropertySyntax(key), kinds, unknown)
-      # Empty sets (margin via property refs, unknown shorthands) accept all.
-      # Otherwise a typed value outside the known members is a hard error even
-      # when exotic alternatives exist — no bro runtime value inhabits those.
-      if kinds.len == 0: return
-      var actual = valTy.tyKind
-      if valTy.kind in {skVar, skLet, skConst} and valTy.varTy != nil:
-        actual = valTy.varTy.tyKind
+    proc checkKindAgainst(key: string, actual: TypeKind, kinds: seq[TypeKind],
+        errNode: Node, origin = "") =
+      ## Shared kinds-membership check with bare-number coercion (mirrors the
+      ## auto-px validation philosophy). `origin` names the value source,
+      ## e.g. " (from --size)" for var() references.
       var names = ""
       var seen: set[TypeKind] = {}
       for k in kinds:
@@ -273,19 +455,157 @@ block extendCodeGen:
         names.add(cssKindName(k))
       case actual
       of ttyColor, ttyLength, ttyAngle, ttyTime, ttyResolution, ttyFlex,
-         ttyUrl, ttyCssString:
+         ttyUrl, ttyCssString, ttyTransform, ttyFilter, ttyImage, ttyShape,
+         ttyEasing:
+        # NOTE: ttyCssVar stays out (legacy-lenient): var() references
+        # check structurally via checkVarRefs first, and undeclared names
+        # must only warn, never hard-error here.
         if actual notin kinds:
-          errNode.error(key & ": expected " & names & ", got " & cssKindName(actual))
+          errNode.error(key & ": expected " & names & ", got " &
+            cssKindName(actual) & origin)
       of ttyInt, ttyFloat, ttyNumber:
-        # Bare numbers coerce (mirrors the auto-px validation philosophy).
         var numericOk = false
         for k in kinds:
-          if k in {ttyLength, ttyAngle, ttyTime, ttyNumber, ttyResolution, ttyFlex}:
+          if k in {ttyLength, ttyAngle, ttyTime, ttyNumber, ttyResolution,
+              ttyFlex}:
             numericOk = true
             break
         if not numericOk:
-          errNode.error(key & ": expected " & names & ", got number")
+          errNode.error(key & ": expected " & names & ", got number" & origin)
       else: discard # strings and the rest stay legacy-lenient
+
+    proc varRefKind(gen: CodeGen, name: string,
+        visited: var seq[string]): tuple[declared, ok: bool, kind: TypeKind] =
+      ## Resolve a custom-property name to a concrete kind via the registry:
+      ## concrete entries, `$var` aliases via scope lookup, chained
+      ## `var(--other)` declarations recursively with a cycle guard.
+      ## Undeclared names report declared=false (use sites warn); cycles and
+      ## unjudgeable shapes report ok=false (use sites stay silent).
+      if not customPropTable.hasKey(name): return (false, false, ttyKeyword)
+      let e = customPropTable[name]
+      if e.hasKind: return (true, true, e.kind)
+      if e.alias.len == 0: return (true, false, ttyKeyword)
+      if e.alias[0] == '$':
+        let s = gen.lookup(ast.newIdent(e.alias), quiet = true)
+        if s != nil and s.kind in {skVar, skLet, skConst} and s.varTy != nil:
+          return (true, true, s.varTy.tyKind)
+        return (true, false, ttyKeyword)
+      if e.alias.startsWith("var(") and e.alias.endsWith(")"):
+        var inner = e.alias[4 ..< e.alias.len - 1]
+        let ci = inner.find(',')
+        let other = (if ci == -1: inner else: inner[0 ..< ci]).strip()
+        if other in visited: return (true, false, ttyKeyword)
+        visited.add(other)
+        return varRefKind(gen, other, visited)
+      (true, false, ttyKeyword)
+
+    proc fallbackKind(gen: CodeGen, fb: Node): tuple[ok: bool, kind: TypeKind] =
+      ## Static kind of a var() fallback node without codegen emission.
+      ## Strings, keywords and unknown shapes stay legacy-lenient (not ok).
+      case fb.kind
+      of nkColor: (true, ttyColor)
+      of nkInt, nkFloat: (true, ttyNumber)
+      of nkUnit:
+        if fb.len > 1 and fb[1].kind == nkIdent:
+          let sk = unitSuffixKind(fb[1].ident)
+          if sk.ok: return (true, sk.kind)
+        (false, ttyKeyword)
+      of nkIdent:
+        if fb.ident.len > 0 and fb.ident[0] == '$':
+          let s = gen.lookup(fb, quiet = true)
+          if s != nil and s.kind in {skVar, skLet, skConst} and s.varTy != nil:
+            return (true, s.varTy.tyKind)
+        (false, ttyKeyword)
+      of nkCall:
+        if fb.len > 0 and fb[0].kind == nkIdent:
+          let rk = broCallReturnKind(fb[0].ident)
+          if rk.ok: return (true, rk.kind)
+        (false, ttyKeyword)
+      else: (false, ttyKeyword)
+
+    proc isVarCall(n: Node): bool =
+      n != nil and n.kind == nkCall and n.len > 0 and
+        n[0].kind == nkIdent and n[0].ident == "var"
+
+    proc checkVarCall(gen: CodeGen, key: string, call: Node,
+        inCall = false) =
+      ## Structural check for one var(--name[, fallback]) call: declared-type
+      ## mismatches are hard errors, undeclared names warn, fallbacks check
+      ## as standalone values. Non-string names cannot resolve statically.
+      ## Reports on the call node, which carries the var token coordinates.
+      ## inCall skips the kind checks (but never the undeclared warning):
+      ## nested in another call's args (`rgba(t, var(--a))`), the var sits
+      ## in a positional slot (alpha, stop, ...) whose type differs from
+      ## the property's, so property-kind checking is unsound there. The
+      ## runtime impls validate what they statically can.
+      if call.len < 2 or call[1].kind != nkString: return
+      let name = call[1].stringVal
+      var kinds: seq[TypeKind]
+      var unknown = false
+      var refVisited: seq[string] = @[]
+      collectAcceptedKinds(cssGetPropertySyntax(key), kinds, unknown, refVisited)
+      if kinds.len > 0:
+        var visited = @[name]
+        let r = varRefKind(gen, name, visited)
+        if not r.declared:
+          codegenWarn(gen.chunk.file, call.ln, call.col,
+            "var(" & name & ") is not declared (unknown custom property)")
+        elif r.ok and not inCall:
+          checkKindAgainst(key, r.kind, kinds, call, " (from " & name & ")")
+      if call.len > 2:
+        if isVarCall(call[2]):
+          checkVarCall(gen, key, call[2], inCall)
+        elif not inCall:
+          let fk = fallbackKind(gen, call[2])
+          if fk.ok and kinds.len > 0:
+            checkKindAgainst(key, fk.kind, kinds, call,
+              " (var(" & name & ") fallback)")
+
+    proc checkVarRefs(gen: CodeGen, key: string, v: Node,
+        inCall = false) =
+      ## Find var() calls in a (possibly compound) dynamic value and check
+      ## each structurally: cssJoin desugar arrays, lists, call args.
+      ## Descending into a non-var call's args sets inCall (positional
+      ## slots); compounds keep direct-position checking.
+      if isVarCall(v):
+        checkVarCall(gen, key, v, inCall)
+        return
+      if v != nil:
+        case v.kind
+        of nkCall, nkColon, nkExprList, nkCommaList, nkArray, nkInfix,
+           nkPostfix, nkBracket, nkUnit:
+          # cssJoin/cssStr are parser-synthesized wrappers around direct
+          # value positions, not real calls: they must not flip positional
+          # checking (their parts check as direct values).
+          let inner = inCall or (v.kind == nkCall and
+            not (v.len > 0 and v[0].kind == nkIdent and
+              v[0].ident in ["cssJoin", "cssStr"]))
+          for c in v.children:
+            checkVarRefs(gen, key, c, inner)
+        else: discard
+
+    proc checkPropValueType(gen: CodeGen, key: string, valTy: Sym, errNode: Node) =
+      ## Static type check for dynamic property values (vars, bro calls,
+      ## infix). Literals are validated as text elsewhere; strings and other
+      ## shapes stay legacy-lenient. Mismatched CSS value types are hard errors
+      ## (e.g. `width: $colorVar` or `color: $lengthVar`). var() references
+      ## check structurally against the custom-property registry first.
+      ## Runs only under `--strict`; otherwise VM/JIT types alone apply.
+      if not strictCss: return
+      if valTy == nil: return
+      checkVarRefs(gen, key, errNode)
+      var kinds: seq[TypeKind]
+      var unknown = false
+      var refVisited: seq[string] = @[]
+      collectAcceptedKinds(cssGetPropertySyntax(key), kinds, unknown, refVisited)
+      # Empty sets (margin via property refs, unknown shorthands) accept all.
+      # Otherwise a typed value outside the known members is a hard error even
+      # when exotic alternatives exist — no bro runtime value inhabits those.
+      if kinds.len == 0: return
+      var actual = valTy.tyKind
+      if valTy.kind in {skVar, skLet, skConst} and valTy.varTy != nil:
+        actual = valTy.varTy.tyKind
+      checkKindAgainst(key, actual, kinds, errNode)
 
     proc propAcceptsColor(propName: string): bool =
       ## True when the property syntax accepts a color value (used to scope
@@ -294,7 +614,8 @@ block extendCodeGen:
         return false # custom properties accept anything
       var kinds: seq[TypeKind]
       var unknown = false
-      collectAcceptedKinds(cssGetPropertySyntax(propName), kinds, unknown)
+      var refVisited: seq[string] = @[]
+      collectAcceptedKinds(cssGetPropertySyntax(propName), kinds, unknown, refVisited)
       result = ttyColor in kinds
 
     proc isSingleColorProp(propName: string): bool =
@@ -311,6 +632,8 @@ block extendCodeGen:
     proc strictValidateColorValue(propName, rawValue: string, errNode: Node) =
       ## Raise on invalid colors. Called after normalization, so remaining
       ## single-word idents in single-color positions must parse.
+      ## Runs only under `--strict`; normalization itself always applies.
+      if not strictCss: return
       if propName.len > 2 and propName[0] == '-' and propName[1] == '-':
         return
       var i = 0
@@ -399,6 +722,41 @@ block extendCodeGen:
         if node.children.len >= 2:
           result = nodeToCssString(node[1]) & " !" & node[0].ident
       else: result = ""
+
+    proc valueNeedsVm(gen: CodeGen, v: Node): bool =
+      ## True when a property value cannot be rendered statically: a `$var`
+      ## reference, a bro value-function call, or a compound containing one.
+      ## Static rendering would leak `$name` or call source text into the CSS.
+      case v.kind
+      of nkIdent:
+        v.ident.len > 0 and v.ident[0] == '$'
+      of nkCall:
+        gen.isBroCall(v)
+      of nkExprList, nkCommaList, nkInfix, nkPostfix, nkBracket:
+        for c in v.children:
+          if valueNeedsVm(gen, c): return true
+        false
+      else: false
+
+    proc emitVmPropValue(gen: CodeGen, key: string, v, errNode: Node, isLast: bool) =
+      ## Emit `key:<evaluated>[;]` as raw text for dynamic values: `$var`
+      ## references resolve against runtime scope (globals included), bro
+      ## calls evaluate to strictly typed values rendered via their tag.
+      gen.chunk.emit(opcPushS)
+      gen.chunk.emit(gen.chunk.getString(key & ":"))
+      gen.chunk.emit(opcEmitRaw)
+      gen.chunk.emit(uint16(errNode.ln))
+      gen.chunk.emit(uint16(errNode.col))
+      checkPropValueType(gen, key, gen.genExpr(v), v)
+      gen.chunk.emit(opcEmitRaw)
+      gen.chunk.emit(uint16(0xFFFF))
+      gen.chunk.emit(uint16(0))
+      if not isLast:
+        gen.chunk.emit(opcPushS)
+        gen.chunk.emit(gen.chunk.getString(";"))
+        gen.chunk.emit(opcEmitRaw)
+        gen.chunk.emit(uint16(0xFFFF))
+        gen.chunk.emit(uint16(0))
 
     proc splitSelector(text: string): seq[string] =
       ## Split a comma-separated selector text into individual selectors.
@@ -700,35 +1058,50 @@ block extendCodeGen:
           gen.chunk.emit(opcEmitRaw)
           gen.chunk.emit(uint16(node.ln))
           gen.chunk.emit(uint16(node.col))
-          # find last property child for trailing-; optimization
-          var lastPropIdx = -1
+          # find last text-emitting child: a property keeps its trailing `;`
+          # whenever declarations from following control flow can glue onto
+          # it at runtime (the branch is VM-evaluated, so assume it emits).
+          var lastEmitterIdx = -1
           for ci, child in bodyChildren:
-            if child.kind == nkColon:
-              lastPropIdx = ci
+            if child.kind == nkColon or child.kind in {nkIf, nkWhile, nkFor, nkCase}:
+              lastEmitterIdx = ci
           for ci, child in bodyChildren:
-            if child.kind == nkColon:
+            case child.kind
+            of nkIf, nkWhile, nkFor, nkCase:
+              # control flow inside the still-open block, in source order
+              # (previously these fell through to the post-`}` loop and
+              # dangled outside the rule)
+              rawPropMode = true
+              gen.genStmt(child)
+              rawPropMode = false
+            of nkColon:
               let key = child[0].ident
+              let isLast = ci == lastEmitterIdx
+              if valueNeedsVm(gen, child[1]):
+                emitVmPropValue(gen, key, child[1], child, isLast)
+                continue
               var val = nodeToCssString(child[1])
               val = resolvePropValue(key, val, child[1], child)
               if val.len > 0:
                 let isVarRef = child[1].kind == nkIdent and child[1].ident.len > 0 and child[1].ident[0] == '$'
                 if not isVarRef and child[1].kind in {nkIdent, nkInt, nkFloat, nkString, nkUnit, nkColor, nkExprList, nkCommaList, nkCall, nkPostfix}:
                   var validateCss = if child[1].kind == nkPostfix: resolvePropValue(key, nodeToCssString(child[1][1]), child[1][1], child) else: val
-                  try:
-                    discard cssValidateProp(key, validateCss)
-                  except CatchableError as e:
-                    if key in ["box-shadow", "grid-template-columns", "content", "margin", "inherits"]:
-                      discard
-                    else:
-                      child.error(e.msg)
+                  if strictCss:
+                    try:
+                      discard cssValidateProp(key, validateCss)
+                    except CatchableError as e:
+                      if key in ["box-shadow", "grid-template-columns", "content", "margin", "inherits"]:
+                        discard
+                      else:
+                        child.error(e.msg)
                 gen.chunk.emit(opcPushS)
-                let isLast = ci == lastPropIdx
                 let css = if isLast: key & ":" & val
                           else: key & ":" & val & ";"
                 gen.chunk.emit(gen.chunk.getString(css))
                 gen.chunk.emit(opcEmitRaw)
                 gen.chunk.emit(uint16(child.ln))
                 gen.chunk.emit(uint16(child.col))
+            else: discard # selectors, at-rules, comments: handled below
           gen.chunk.emit(opcPushS)
           gen.chunk.emit(gen.chunk.getString("}"))
           gen.chunk.emit(opcEmitRaw)
@@ -740,9 +1113,7 @@ block extendCodeGen:
         for stmt in nestedStmts:
           case stmt.kind
           of nkIf, nkWhile, nkFor, nkCase:
-            rawPropMode = true
-            gen.genStmt(stmt)
-            rawPropMode = false
+            discard # already emitted in place above, in source order
           else:
             gen.genStmt(stmt)
         nestingParent = savedParent
@@ -757,15 +1128,21 @@ block extendCodeGen:
         gen.chunk.emit(opcEmitRaw)
         gen.chunk.emit(uint16(node.ln))
         gen.chunk.emit(uint16(node.col))
-        # Declarations & control flow in source order
-        var lastPropIdx = -1
+        # Declarations & control flow in source order. A property keeps its
+        # trailing `;` whenever following control flow (or a nested at-rule,
+        # emitted inside the block below) can glue onto it at runtime.
+        var lastEmitterIdx = -1
         for ci, child in bodyChildren:
-          if child.kind == nkColon:
-            lastPropIdx = ci
+          if child.kind == nkColon or child.kind in {nkIf, nkWhile, nkFor, nkCase}:
+            lastEmitterIdx = ci
         for ci, child in bodyChildren:
           case child.kind
           of nkColon:
             let key = child[0].ident
+            let isLast = ci == lastEmitterIdx and not hasNestedAtRule
+            if valueNeedsVm(gen, child[1]):
+              emitVmPropValue(gen, key, child[1], child, isLast)
+              continue
             var val = nodeToCssString(child[1])
             val = resolvePropValue(key, val, child[1], child)
             if val.len > 0:
@@ -780,7 +1157,6 @@ block extendCodeGen:
                   else:
                     child.error(e.msg)
               gen.chunk.emit(opcPushS)
-              let isLast = ci == lastPropIdx
               let css = if isLast: key & ":" & val
                         else: key & ":" & val & ";"
               gen.chunk.emit(gen.chunk.getString(css))
@@ -843,13 +1219,14 @@ block extendCodeGen:
             var validateCss =
               if prop[1].kind == nkPostfix: resolvePropValue(key, nodeToCssString(prop[1][1]), prop[1][1], prop)
               else: rawCss
-            try:
-              discard cssValidateProp(key, validateCss)
-            except CatchableError as e:
-              if key in ["box-shadow", "grid-template-columns", "content", "margin", "inherits"]:
-                discard
-              else:
-                prop.error(e.msg)
+            if strictCss:
+              try:
+                discard cssValidateProp(key, validateCss)
+              except CatchableError as e:
+                if key in ["box-shadow", "grid-template-columns", "content", "margin", "inherits"]:
+                  discard
+                else:
+                  prop.error(e.msg)
             let cssType = cssGetPropertySyntax(key)
             let expectedKind =
               if cssType != nil and cssType.kind == skType:
@@ -872,7 +1249,7 @@ block extendCodeGen:
         let valTy =
           if isVarRef:
             let vt = gen.genExpr(prop[1])
-            checkPropValueType(key, vt, prop[1])
+            checkPropValueType(gen, key, vt, prop[1])
             vt
           else:
             case prop[1].kind
@@ -901,7 +1278,7 @@ block extendCodeGen:
               # Bro calls (lighten, parseLength, ...), infix and other dynamic
               # expressions evaluate to strictly typed runtime values.
               let vt = gen.genExpr(prop[1])
-              checkPropValueType(key, vt, prop[1])
+              checkPropValueType(gen, key, vt, prop[1])
               vt
         result.objectFields[key] = (
           id: result.objectFields.len,
@@ -948,7 +1325,7 @@ block extendCodeGen:
           gen.chunk.emit(opcEmitRaw)
           gen.chunk.emit(uint16(node.ln))
           gen.chunk.emit(uint16(node.col))
-          checkPropValueType(key, gen.genExpr(v), v)
+          checkPropValueType(gen, key, gen.genExpr(v), v)
           gen.chunk.emit(opcEmitRaw)
           gen.chunk.emit(uint16(0xFFFF))
           gen.chunk.emit(uint16(0))
@@ -966,13 +1343,14 @@ block extendCodeGen:
             discard
           else:
             var validateCss = if v.kind == nkPostfix: resolvePropValue(key, nodeToCssString(v[1]), v[1], node) else: val
-            try:
-              discard cssValidateProp(key, validateCss)
-            except CatchableError as e:
-              if key in ["margin", "inherits"]:
-                discard
-              else:
-                node.error(e.msg)
+            if strictCss:
+              try:
+                discard cssValidateProp(key, validateCss)
+              except CatchableError as e:
+                if key in ["margin", "inherits"]:
+                  discard
+                else:
+                  node.error(e.msg)
           gen.chunk.emit(opcPushS)
           gen.chunk.emit(gen.chunk.getString(key & ":" & val & ";"))
           gen.chunk.emit(opcEmitRaw)
@@ -1092,27 +1470,34 @@ block extendCodeGen:
         gen.chunk.emit(opcEmitRaw)
         gen.chunk.emit(uint16(node.ln))
         gen.chunk.emit(uint16(node.col))
-        var lastPropIdx = -1
+        # A property keeps its trailing `;` whenever a following sibling
+        # (nested rule, control flow, ...) emits text into the same block.
+        var lastEmitterIdx = -1
         for ci, child in node[2].children:
-          if child.kind == nkColon:
-            lastPropIdx = ci
+          if child.kind == nkColon or child.kind in {nkIf, nkWhile, nkFor, nkCase,
+              nkClassSelector, nkIdSelector, nkPseudoSelector, nkElementSelector, nkAtRule}:
+            lastEmitterIdx = ci
         for ci, child in node[2].children:
           if child.kind == nkColon:
             let key = child[0].ident
+            let isLast = ci == lastEmitterIdx
+            if valueNeedsVm(gen, child[1]):
+              emitVmPropValue(gen, key, child[1], child, isLast)
+              continue
             var val = nodeToCssString(child[1])
             val = resolvePropValue(key, val, child[1], child)
             let isVarRef = child[1].kind == nkIdent and child[1].ident.len > 0 and child[1].ident[0] == '$'
             if not isVarRef and child[1].kind in {nkIdent, nkInt, nkFloat, nkString, nkUnit, nkColor, nkExprList, nkCommaList, nkCall, nkPostfix}:
               var validateCss = if child[1].kind == nkPostfix: resolvePropValue(key, nodeToCssString(child[1][1]), child[1][1], child) else: val
-              try:
-                discard cssValidateProp(key, validateCss)
-              except CatchableError as e:
-                if key in ["box-shadow", "grid-template-columns", "content", "margin", "inherits"]:
-                  discard
-                else:
-                  child.error(e.msg)
+              if strictCss:
+                try:
+                  discard cssValidateProp(key, validateCss)
+                except CatchableError as e:
+                  if key in ["box-shadow", "grid-template-columns", "content", "margin", "inherits"]:
+                    discard
+                  else:
+                    child.error(e.msg)
             gen.chunk.emit(opcPushS)
-            let isLast = ci == lastPropIdx
             let css = if isLast: key & ":" & val
                       else: key & ":" & val & ";"
             gen.chunk.emit(gen.chunk.getString(css))
@@ -1202,6 +1587,9 @@ block extendVM:
     # a Voodoo injected snippet to initialize the `result` variable and the
     # source map segment accumulator (read back by the CLI after interpret)
     result = initValue("")
+    # JIT alias: native-compiled emit bridges append to the same output
+    # buffer via this globals ref (the JIT cannot see `result` itself).
+    vm.globals["__bro_output"] = result
     vm.globals["__bro_sourcemap_segments"] = initValue("")
     # pretty-printing state lives in vm.globals because extended case
     # branches cannot capture snippet locals. Depth tracks rule nesting so
@@ -1254,14 +1642,38 @@ block extendVM:
       let valueStr = co.getArg1Str(pcIdx, currentChunk)
       stack.push(initValue(valueStr))
     of opcEmitRaw:
-      let sl = co.getArg1Int(pcIdx)
-      let sc = co.arg2[pcIdx].int
+      # Shared implementation (also used by the JIT broEmitRaw bridge).
+      broEmitRawImpl(vm, result, stack.pop(), co.getArg1Int(pcIdx),
+        co.arg2[pcIdx].int, currentChunk.file)
+    of opcEmitCSS:
+      # Shared implementation (also used by the JIT broEmitCSS bridge).
+      # Stack (bottom..top): kind int, selector string, props object.
+      let cssProps = stack.pop()
+      let cssSel = stack.pop()
+      let cssKind = stack.pop()
+      broEmitCSSImpl(vm, result, cssKind, cssSel, cssProps,
+        co.strKeys[pcIdx], currentChunk.file)
+
+block extendJitProcs:
+  # Shared emit implementations: the interpreter branches below call them,
+  # and the JIT emit bridges (bro/engine/jitbridge.nim) call the same
+  # procs, so native and interpreted emission cannot drift apart.
+
+  extendModule "vancode" / "interpreter" / "jit" / "host_emit.nim":
+    proc emitCssMeta*(cached: CachedOps, pc: int, ch: Chunk): int32 =
+      ## Pack an EmitCSS site: position pairs plus chunk file.
+      var poses: seq[int64] = @[]
+      for p in cached.strKeys[pc]:
+        poses.add(p.int64)
+      registerJitHostMeta(JitHostMeta(ints: poses, strs: @[ch.file]))
+
+  extendProc "interpreter/vm.nim":
+    proc broEmitRawImpl*(vm: Vm, outBuf: Value, sv: Value, sl, sc: int, file: string) =
       if sl != 0xFFFF: # not a "no mapping" sentinel
         vm.globals["__bro_sourcemap_segments"].stringVal[].add(
-          $result.stringVal[].len & "\x03" & $sl & "\x03" & $sc & "\x03" & currentChunk.file & "\x02")
+          $outBuf.stringVal[].len & "\x03" & $sl & "\x03" & $sc & "\x03" & file & "\x02")
       # Type-tolerant pop: raw emissions may carry VM-evaluated values
       # (ints, floats, bools) from control-flow property values.
-      let sv = stack.pop()
       let rawStr =
         case sv.typeId
         of tyString: sv.stringVal[]
@@ -1284,92 +1696,93 @@ block extendVM:
       let prettyNow = vm.globals["__bro_pretty"].boolVal
       let depthNow = vm.globals["__bro_depth"].intVal.int
       # Strip trailing ';' before '}' — O(1) single-char check
-      if rawStr == "}" and result.stringVal[].len > 0 and result.stringVal[^1] == ';':
-        result.stringVal[].setLen(result.stringVal[].len - 1)
+      if rawStr == "}" and outBuf.stringVal[].len > 0 and outBuf.stringVal[^1] == ';':
+        outBuf.stringVal[].setLen(outBuf.stringVal[].len - 1)
       if not prettyNow or rawStr.len == 0:
-        result.stringVal[].add(rawStr)
+        outBuf.stringVal[].add(rawStr)
       elif rawStr == "}":
         # closing brace: drop pending auto-indent (its leading '\n' survives),
         # or open a fresh line when the previous chunk left none
         let indW = vm.globals["__bro_indw"].intVal.int
         if indW > 0:
-          result.stringVal[].setLen(result.stringVal[].len - indW)
+          outBuf.stringVal[].setLen(outBuf.stringVal[].len - indW)
         else:
-          result.stringVal[].add('\n')
+          outBuf.stringVal[].add('\n')
         vm.globals["__bro_depth"] = initValue((depthNow - 1).int64)
         for _ in 1 .. (depthNow - 1) * 2:
-          result.stringVal[].add(' ')
-        result.stringVal[].add(rawStr)
-        result.stringVal[].add('\n')
+          outBuf.stringVal[].add(' ')
+        outBuf.stringVal[].add(rawStr)
+        outBuf.stringVal[].add('\n')
         for _ in 1 .. (depthNow - 1) * 2:
-          result.stringVal[].add(' ')
+          outBuf.stringVal[].add(' ')
         vm.globals["__bro_indw"] = initValue(((depthNow - 1) * 2).int64)
         vm.globals["__bro_atline"] = initValue(true)
       elif rawStr[^1] == '{':
         # opener: header line, then descend
         if not vm.globals["__bro_atline"].boolVal:
-          result.stringVal[].add('\n')
+          outBuf.stringVal[].add('\n')
           for _ in 1 .. depthNow * 2:
-            result.stringVal[].add(' ')
+            outBuf.stringVal[].add(' ')
           vm.globals["__bro_indw"] = initValue((depthNow * 2).int64)
-        result.stringVal[].add(rawStr)
+        outBuf.stringVal[].add(rawStr)
         vm.globals["__bro_indw"] = initValue(0'i64) # header content landed
         vm.globals["__bro_depth"] = initValue((depthNow + 1).int64)
-        result.stringVal[].add('\n')
+        outBuf.stringVal[].add('\n')
         for _ in 1 .. (depthNow + 1) * 2:
-          result.stringVal[].add(' ')
+          outBuf.stringVal[].add(' ')
         vm.globals["__bro_indw"] = initValue(((depthNow + 1) * 2).int64)
         vm.globals["__bro_atline"] = initValue(true)
       else:
         # declaration / statement chunk — own line at current depth
         if not vm.globals["__bro_atline"].boolVal:
-          result.stringVal[].add('\n')
+          outBuf.stringVal[].add('\n')
           for _ in 1 .. depthNow * 2:
-            result.stringVal[].add(' ')
-        result.stringVal[].add(rawStr)
+            outBuf.stringVal[].add(' ')
+        outBuf.stringVal[].add(rawStr)
         vm.globals["__bro_indw"] = initValue(0'i64) # content landed
         if rawStr[^1] != '\n':
           # self-terminated chunks (doc-block banners) keep their own newline
-          result.stringVal[].add('\n')
+          outBuf.stringVal[].add('\n')
         for _ in 1 .. depthNow * 2:
-          result.stringVal[].add(' ')
+          outBuf.stringVal[].add(' ')
         vm.globals["__bro_indw"] = initValue((depthNow * 2).int64)
         vm.globals["__bro_atline"] = initValue(true)
-    of opcEmitCSS:
-      let poses = co.strKeys[pcIdx]
+
+    proc broEmitCSSImpl*(vm: Vm, outBuf: Value, kindV, selV, propsV: Value,
+        poses: seq[uint16], file: string) =
       var pi = 0
       # selector mapping (first position pair)
       if poses.len >= 2:
         vm.globals["__bro_sourcemap_segments"].stringVal[].add(
-          $result.stringVal[].len & "\x03" & $poses[pi] & "\x03" & $poses[pi + 1] & "\x03" & currentChunk.file & "\x02")
+          $outBuf.stringVal[].len & "\x03" & $poses[pi] & "\x03" & $poses[pi + 1] & "\x03" & file & "\x02")
         pi += 2
-      let props = stack.pop().objectVal
+      let props = propsV.objectVal
       let keys = props.keys
-      let selectorName = stack.pop().stringVal[]
-      let kind = stack.pop().intVal
+      let selectorName = selV.stringVal[]
+      let kind = kindV.intVal
       let prefix =
         case kind
         of 0: "." # class selector
         of 1: "#" # id selector
         of 2: ":" # pseudo-selector
         else: ""
-      result.stringVal[].add(prefix & selectorName & "{")
+      outBuf.stringVal[].add(prefix & selectorName & "{")
       let prettyNow = vm.globals["__bro_pretty"].boolVal
       if prettyNow:
         # header content landed — clear pending indent before descending
         vm.globals["__bro_indw"] = initValue(0'i64)
         # structured rule: descend for declarations, matching raw-path layout
         vm.globals["__bro_depth"] = initValue((vm.globals["__bro_depth"].intVal + 1).int64)
-        result.stringVal[].add('\n')
+        outBuf.stringVal[].add('\n')
         for _ in 1 .. vm.globals["__bro_depth"].intVal.int * 2:
-          result.stringVal[].add(' ')
+          outBuf.stringVal[].add(' ')
         vm.globals["__bro_indw"] = initValue((vm.globals["__bro_depth"].intVal.int * 2).int64)
         vm.globals["__bro_atline"] = initValue(true)
       for i, key in keys:
         # per-property mapping
         if pi + 1 < poses.len:
           vm.globals["__bro_sourcemap_segments"].stringVal[].add(
-            $result.stringVal[].len & "\x03" & $poses[pi] & "\x03" & $poses[pi + 1] & "\x03" & currentChunk.file & "\x02")
+            $outBuf.stringVal[].len & "\x03" & $poses[pi] & "\x03" & $poses[pi + 1] & "\x03" & file & "\x02")
           pi += 2
         let val =
           case props.fields[i].typeId
@@ -1395,12 +1808,12 @@ block extendVM:
 
         if prettyNow and i > 0:
           # first declaration sits on the opener's fresh line; rest get their own
-          result.stringVal[].add('\n')
+          outBuf.stringVal[].add('\n')
           for _ in 1 .. vm.globals["__bro_depth"].intVal.int * 2:
-            result.stringVal[].add(' ')
-        result.stringVal[].add(key & ":" & val)
+            outBuf.stringVal[].add(' ')
+        outBuf.stringVal[].add(key & ":" & val)
         if i < keys.len - 1:
-          result.stringVal[].add(";")
+          outBuf.stringVal[].add(";")
         if prettyNow:
           vm.globals["__bro_atline"] = initValue(false)
           vm.globals["__bro_indw"] = initValue(0'i64) # declaration content landed
@@ -1408,19 +1821,110 @@ block extendVM:
         # drop pending auto-indent, dedent, place closing brace at parent level
         let indW = vm.globals["__bro_indw"].intVal.int
         if indW > 0:
-          result.stringVal[].setLen(result.stringVal[].len - indW)
+          outBuf.stringVal[].setLen(outBuf.stringVal[].len - indW)
         if not vm.globals["__bro_atline"].boolVal:
-          result.stringVal[].add('\n')
+          outBuf.stringVal[].add('\n')
         elif indW > 0:
           discard # truncated indent left the '\n' from the opener in place
         vm.globals["__bro_depth"] = initValue((vm.globals["__bro_depth"].intVal - 1).int64)
         for _ in 1 .. vm.globals["__bro_depth"].intVal.int * 2:
-          result.stringVal[].add(' ')
-      result.stringVal[].add("}")
+          outBuf.stringVal[].add(' ')
+      outBuf.stringVal[].add("}")
       if prettyNow:
         # leave the cursor at a fresh line for the next sibling rule
-        result.stringVal[].add('\n')
+        outBuf.stringVal[].add('\n')
         for _ in 1 .. vm.globals["__bro_depth"].intVal.int * 2:
-          result.stringVal[].add(' ')
+          outBuf.stringVal[].add(' ')
         vm.globals["__bro_indw"] = initValue((vm.globals["__bro_depth"].intVal.int * 2).int64)
         vm.globals["__bro_atline"] = initValue(true)
+
+block extendJit:
+  # JIT admission + emission for bro's opcodes and the string/object
+  # plumbing its chunks use. Injected branches resolve names at the vancode
+  # expansion site, so emission goes through vancode-owned host_emit
+  # one-liners; bro behavior arrives as registered host bridges.
+  extendCaseStmt "vmJitDynasmAllowCase":
+    case oc:
+    of opcPushS, opcPushF, opcPushG, opcPopG, opcConcatStr,
+       opcConstrArray, opcConstrObj,
+       opcPushSelector, opcPushProperty, opcPushValue, opcEmitCSS, opcEmitRaw:
+      result = true
+
+  extendCaseStmt "vmJitDynasmEmitCase":
+    case oc:
+    of opcPushS, opcPushValue:
+      if not emitConstPush(addr d, cached, pc, theProc.chunk, "broPushConst"):
+        return nil
+    of opcPushF:
+      if not emitFloatPush(addr d, cached, pc, theProc.chunk, "broPushFloat"):
+        return nil
+    of opcPushG:
+      if not emitGlobalPush(addr d, cached, pc, theProc.chunk, "broPushG"):
+        return nil
+    of opcPopG:
+      if not emitGlobalPop(addr d, cached, pc, theProc.chunk, "broPopG"):
+        return nil
+    of opcConcatStr:
+      let concatFn = findJitHostBridge("broConcatStr")
+      if concatFn == nil: return nil
+      vancode_bridge_2(addr d, concatFn)
+    of opcConstrArray:
+      if not emitHostCallValue(addr d, cached.getArg1Int(pc), "broConstrArray", 0):
+        return nil
+    of opcConstrObj:
+      if not emitHostCallValue(addr d, cached.getArg1Int(pc), "broConstrObj",
+          constrKeysMeta(cached, pc, theProc.chunk)):
+        return nil
+    of opcPushSelector:
+      # interpreter pushes kind first, name on top — same order here
+      vancode_push_i(addr d, cached.arg2[pc].cint)
+      if not emitConstPush(addr d, cached, pc, theProc.chunk, "broPushConst"):
+        return nil
+    of opcPushProperty:
+      discard # runtime no-op, mirrors the interpreter fallthrough
+    of opcEmitRaw:
+      if not emitHostCallVoid(addr d, 1, "broEmitRaw",
+          emitRawMeta(cached, pc, theProc.chunk)):
+        return nil
+    of opcEmitCSS:
+      if not emitHostCallVoid(addr d, 3, "broEmitCSS",
+          emitCssMeta(cached, pc, theProc.chunk)):
+        return nil
+
+  extendCaseStmt "vmJitTraceEmitCase":
+    # Dormant until the trace recorder admits host ops (it aborts on
+    # anything outside arithmetic/locals/jumps, so no trace can contain
+    # these yet). `opcPushG/PopG` are deliberately absent: the backend's
+    # own `discard` branches claim those labels.
+    case oc:
+    of opcPushS, opcPushValue:
+      if not emitConstPush(addr d, cached, pc, cast[Chunk](trace.chunk), "broPushConst"):
+        return nil
+    of opcPushF:
+      if not emitFloatPush(addr d, cached, pc, cast[Chunk](trace.chunk), "broPushFloat"):
+        return nil
+    of opcConcatStr:
+      let concatFn = findJitHostBridge("broConcatStr")
+      if concatFn == nil: return nil
+      vancode_bridge_2(addr d, concatFn)
+    of opcConstrArray:
+      if not emitHostCallValue(addr d, cached.getArg1Int(pc), "broConstrArray", 0):
+        return nil
+    of opcConstrObj:
+      if not emitHostCallValue(addr d, cached.getArg1Int(pc), "broConstrObj",
+          constrKeysMeta(cached, pc, cast[Chunk](trace.chunk))):
+        return nil
+    of opcPushSelector:
+      vancode_push_i(addr d, cached.arg2[pc].cint)
+      if not emitConstPush(addr d, cached, pc, cast[Chunk](trace.chunk), "broPushConst"):
+        return nil
+    of opcPushProperty:
+      discard
+    of opcEmitRaw:
+      if not emitHostCallVoid(addr d, 1, "broEmitRaw",
+          emitRawMeta(cached, pc, cast[Chunk](trace.chunk))):
+        return nil
+    of opcEmitCSS:
+      if not emitHostCallVoid(addr d, 3, "broEmitCSS",
+          emitCssMeta(cached, pc, cast[Chunk](trace.chunk))):
+        return nil

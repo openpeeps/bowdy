@@ -14,9 +14,26 @@ import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value, resolver, m
 import ../engine/parser
 import ../engine/sourcemap
 import ../engine/stdlib/[libsystem, libarrays, libcolors, libcss]
+# JIT import sits after the engine imports on purpose: vancodegen's voodoo
+# registrations must run before vancode's JIT compilers are compiled, so any
+# future `extendCaseStmt` JIT blocks in vancodegen apply to this build.
+from pkg/vancode/interpreter/jit/jit import installJit
+from pkg/vancode/interpreter/jit/compiler_bridge import resetJitState
+import ../engine/jitbridge
+
+var codegenWarnings: seq[string] = @[]
+  ## Non-fatal codegen warnings collected during a compile, flushed with
+  ## displayWarning once the command finishes (success or failure).
+
+proc flushCodegenWarnings() =
+  for w in codegenWarnings:
+    displayWarning(w)
+  codegenWarnings.setLen(0)
 
 proc parserCallback(astProgram: var Ast, path: string, resolver: FileResolver) =
-  parser.parseScript(astProgram, readFile(path), path)
+  parser.parseScriptFile(astProgram, path)
+  if codegen.strictCss:
+    codegen.collectCustomProps(astProgram)
 
 #
 # Compile command
@@ -70,12 +87,12 @@ proc writeSourceMap(vm: Vm, srcPath, code: string, outputFilePath: string) =
 proc compileCode(filePath: string,
           manager: ModuleManager, globalData: JsonNode, localData: JsonNode,
           output: bool = false, outputPath: string = "",
-          sourceMap: bool = false, pretty: bool = false) =
+          sourceMap: bool = false, pretty: bool = false,
+          strict: bool = false, watch: bool = false) =
   # Compile the BASS code at `filePath` and optionally save the output to `
   var program: Ast # the AST representation of the script
-  let code = readFile(filePath)
   try:
-    parser.parseScript(program, code, filePath)
+    parser.parseScriptFile(program, filePath)
   except BroParserError as e:
     displayError(e.msg)
     quit(1)
@@ -101,17 +118,33 @@ proc compileCode(filePath: string,
   script.stdpos = script.procs.high
 
   # compile the code and handle any errors
+  codegen.strictCss = strict
   try:
+    codegen.resetCustomProps()
+    codegenWarnings.setLen(0)
+    if strict:
+      codegen.collectCustomProps(program)
     var compiler = initCodeGen(script, module, mainChunk,
                                   manager = manager, parserCallback = parserCallback)
     compiler.genScript(program, none(string))
     
     # initialize a Voodoo VM and execute the script
+    # Hot detection and JIT live only in watch mode: each save rebuilds a
+    # fresh script, so procIds are per-save. resetJitState frees the
+    # previous save's native buffers (keeping one spare) and clears
+    # per-save caches, while the process-wide hot counts in vancode
+    # survive, letting main go native after hotChunkThreshold saves.
+    # One-shot runs stay interpreted for minimal latency.
     let virtualMachine = newVirtualMachine(VMPreferences(
-      enableHotCodeDetection: true,
+      enableHotCodeDetection: watch,
       hotProcThreshold: 10,
-      hotChunkThreshold: 100
+      hotChunkThreshold: 2
     ))
+    if watch:
+      resetJitState()
+      virtualMachine.prewarmScriptOps(script)
+      virtualMachine.installJit()
+      initBroJit(virtualMachine)
     if pretty:
       virtualMachine.globals["__bro_pretty"] = initValue(true)
     if not output:
@@ -122,17 +155,20 @@ proc compileCode(filePath: string,
       if sourceMap:
         if pretty:
           displayInfo("--pretty output keeps minified-layout source map mappings")
-        writeSourceMap(virtualMachine, filePath, code, outputFilePath)
+        writeSourceMap(virtualMachine, filePath, readFile(filePath), outputFilePath)
         let mapName = outputFilePath.extractFilename.changeFileExt(".css.map")
         writeFile(outputFilePath, cssOutput & "\n/*# sourceMappingURL=" & mapName & " */")
       else:
         # if fileExists(outputFilePath):
         writeFile(outputFilePath, cssOutput)
+    flushCodegenWarnings()
   except CodeGenError as e:
-    displayError(e.msg)
+    flushCodegenWarnings()
+    displayError(parser.errorContextFor(filePath, e.ln, e.col) & e.msg)
     quit(1)
   except CatchableError as e:
     # Safety net: catch any unhandled validation errors from the codegen
+    flushCodegenWarnings()
     displayError("internal error: " & e.msg)
     quit(1)
 
@@ -151,6 +187,10 @@ proc cCommand*(v: Values) =
   let enabledWatch = v.has("-w")
   let enabledSourceMap = v.has("--sourceMap")
   let enabledPretty = v.has("--pretty")
+  let enabledStrict = v.has("--strict")
+  let enabledWarnings =
+    if v.has("--warnings"): v.get("--warnings").getBool()
+    else: true
 
   if not srcPath.isAbsolute:
     srcPath = getCurrentDir() / srcPath
@@ -224,27 +264,38 @@ proc cCommand*(v: Values) =
         else: newJObject()
       else: newJObject()
 
+  # route non-fatal codegen warnings into the command-level collector,
+  # or drop them entirely with --warnings:false
+  if enabledWarnings:
+    codegen.warnHandler = proc(msg: string) {.gcsafe.} =
+      {.cast(gcsafe).}: # command runs single-threaded: safe to collect locally
+        codegenWarnings.add(msg)
+  else:
+    codegen.warnHandler = proc(msg: string) {.gcsafe.} = discard
+
   # compile the code for the first time
   compileCode(srcPath, manager, globalData, localData, hasOutput, outputPath,
-      enabledSourceMap, enabledPretty)
+      enabledSourceMap, enabledPretty, enabledStrict, enabledWatch)
 
   # initialize the file watcher for browser sync if watch mode is enabled
   if enabledWatch:
     if hasOutput:
       displayInfo("Watching for file changes...")
     
-    # Set up a file watcher to recompile on changes
-    browserSyncWatcher = newWatchout(@[srcPath.parentDir], some("*.bass"))
+    # Set up a file watcher to recompile on changes, filtered by the
+    # entry file's extension (the input may be .bass or plain .css)
+    browserSyncWatcher = newWatchout(@[srcPath.parentDir], some("*" & splitFile(srcPath).ext))
 
     proc onChange(file: watchout.File) =
       if not hasOutput:
         # If no output file is specified, just recompile and print
         # the resulted CSS in the console
-        compileCode(file.getPath, manager, globalData, localData, false, "")
+        compileCode(file.getPath, manager, globalData, localData, false, "",
+            false, false, enabledStrict, true)
       else:
         let t = cpuTime()
         compileCode(file.getPath, manager, globalData, localData, hasOutput,
-            outputPath, enabledSourceMap, enabledPretty)
+            outputPath, enabledSourceMap, enabledPretty, enabledStrict, true)
         displayInfo("File changed: " & file.getPath)
         displaySuccess("Recompiled in " & $((cpuTime() - t)) & "s")
 
@@ -272,9 +323,8 @@ proc astCommand*(v: Values) =
       hasOutput = true
       v.get("-o").getFilename
     else: ""
-  let code = readFile(srcPath)
   try:
-    parser.parseScript(program, code, srcPath)
+    parser.parseScriptFile(program, srcPath)
   except BroParserError as e:
     displayError(e.msg)
     quit(1)

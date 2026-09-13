@@ -306,6 +306,54 @@ proc loadLibrary*(script: Script, globalData, localData: JsonNode): Module =
     proc (args: StackView, argc: int): Value =
       result = initValue($args[0].boolVal))
 
+  script.addProc(result, "cssJoin", @[p("parts", ttyArray)], ttyString,
+    proc (args: StackView, argc: int): Value =
+      ## Join CSS value parts (plus literal separator strings) into one
+      ## string. Target of the parser's desugar for dynamic multi-value
+      ## properties (`margin: $a $b`): dynamics arrive pre-stringified via
+      ## cssStr so the array stays homogeneous. Non-string elements render
+      ## like cssStr, so direct calls stay total too.
+      var buf = ""
+      for f in args[0].objectVal.fields:
+        let vv = f.toValue()
+        case vv.typeId
+        of tyString: buf.add(vv.stringVal[])
+        of tyInt: buf.add($vv.intVal)
+        of tyFloat:
+          var fs = $vv.floatVal
+          if fs.len > 2 and fs[fs.len - 2] == '.' and fs[fs.len - 1] == '0':
+            fs.setLen(fs.len - 2)
+          buf.add(fs)
+        of tyBool: buf.add($vv.boolVal)
+        else:
+          if vv.objectVal != nil and vv.objectVal.isForeign and
+              vv.objectVal.foreign.tag.len > 0:
+            buf.add(vv.objectVal.foreign.tag)
+      result = initValue(buf))
+
+  script.addProc(result, "cssStr", @[p("x", ttyAny)], ttyString,
+    proc (args: StackView, argc: int): Value =
+      ## Render one runtime value to its CSS display string: primitives
+      ## stringify, strictly typed values use their cached display spelling
+      ## (foreign tag). Mirrors the VM's raw-emission pop. Used by the
+      ## parser's desugar so `$vars`/calls inside multi-values evaluate.
+      let vv = args[0]
+      case vv.typeId
+      of tyString: result = initValue(vv.stringVal[])
+      of tyInt: result = initValue($vv.intVal)
+      of tyFloat:
+        var fs = $vv.floatVal
+        if fs.len > 2 and fs[fs.len - 2] == '.' and fs[fs.len - 1] == '0':
+          fs.setLen(fs.len - 2)
+        result = initValue(fs)
+      of tyBool: result = initValue($vv.boolVal)
+      else:
+        if vv.objectVal != nil and vv.objectVal.isForeign and
+            vv.objectVal.foreign.tag.len > 0:
+          result = initValue(vv.objectVal.foreign.tag)
+        else:
+          result = initValue(""))
+
   let genT = ast.newIdent("T")
   let genArrayType = newSym(skGenericParam, genT, impl = genT)
   genArrayType.constraint = result.sym"any"

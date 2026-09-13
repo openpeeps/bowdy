@@ -4,8 +4,6 @@
   Typed &bullet; VM & JIT Compiler &bullet; Written in Nim language 
 </p>
 
-
-
 <p align="center">
   <code>nimble install bro</code> / <code>clue install bro --build</code>
 </p>
@@ -28,7 +26,7 @@ BASS files use the `.bass` extension and compile to `.css`.
 - Fast stack-based VM & JIT Compiler
 - Typed system for CSS values (`color`, `length`, `number`, etc.) with compile-time checks
 - Familiar CSS syntax with indentation or brace blocks
-- Variables (`let`, `var`, `const`) with optional type annotations and export (`*`)
+- Variables (`var`, `const`) with optional type annotations and export (`*`)
 - Nesting with parent selector `&`, combinators, and comma-separated selectors
 - Reusable mixins with typed parameters and named arguments
 - Control flow (`if` / `elif` / `else`, `for`, `while`, `case` / `of`) and functions (`fn` / `func`)
@@ -62,6 +60,13 @@ bro -h                               # all options
 
 Source maps are supported with `--sourceMap`.
 
+By default `bro c` is lenient: only VM types apply (variables, function
+signatures, stdlib constructors), so a mistyped `width: $colorVar` still
+compiles. Pass `--strict` to enable the static CSS type system: property
+values are checked against their CSS syntax, invalid colors are hard
+errors, and undeclared `var(--x)` names warn. Output is identical either
+way; only diagnostics change.
+
 ## Syntax Showcase
 
 All examples are minified by default. Add `--pretty` for formatted output.
@@ -79,7 +84,8 @@ var $radius = 4px
 ```css
 .card{color:#0d6efd;border-radius:4px}
 ```
-Variables use `let` / `var` / `const`, support interpolation (`$primary`), and are checked against CSS property types — the compiler rejects mismatches such as `width: red`.
+Variables use `var` / `const`, support interpolation (`$primary`), and are checked against CSS property types — the compiler rejects mismatches such as `width: red`.
+CSS custom properties take part in the same system: `var(--x)` parses as a real call returning a typed `cssvar` value, so custom-property names stay atomic (`var(--color-gray-100)` is never re-split) and use sites check structurally. Every `--x` declaration (entry file and imports, order-independent) registers its inferred type, so under `--strict` `color: var(--fs-medium)` is a hard error when `--fs-medium` holds a size. Undeclared names only warn (they may come from plain-CSS imports or JS), `var(--x, fallback)` validates the fallback too, and `env()` is left alone. The CLI collects warnings during a compile and prints them with `displayWarning` once the CSS is out.
 
 ### 2. Nesting
 
@@ -166,6 +172,74 @@ var $p = dbl(21)
 .a{z-index:42}
 ```
 `func` is an alias for `fn`. Functions support overloading and forward declarations.
+
+### 7. Embed Bro in your Nim app
+
+`import bro` gives two high-level calls that never quit the process.
+Both return a `BroCompileResult` (`ok`, `css`, `warnings`, `error`):
+
+```nim
+import bro
+
+let r = compileStylesheet("var $primary = #0d6efd\n.card\n  color: $primary")
+if r.ok:
+  echo r.css
+  for w in r.warnings: echo w
+else:
+  echo "build failed: " & r.error
+
+let f = compileStylesheetFile("styles/main.bass", pretty = true)
+```
+
+`compileStylesheet` compiles a source string (relative imports resolve
+against the working directory); `compileStylesheetFile` compiles a file
+on disk and resolves sibling imports next to it. Both take an optional
+`strict = false` parameter mirroring `bro c --strict`. Parse, type, and
+codegen failures come back as `ok == false` with `error` set, so a host
+app stays in control.
+
+## Benchmarks
+
+`benchmarks/bench.sh` times four CLI commands head-to-head with hyperfine:
+`sassc`, `bro c`, `bro c --strict`, and dart-sass when the vendored
+`benchmarks/dart-sass/sass` binary (gitignored) is present:
+
+```sh
+benchmarks/bench.sh
+benchmarks/bench.sh --warmup=2 --runs=5
+benchmarks/bench.sh --big-count=500   # smaller Suite C
+```
+
+Suites (reports land in `bin/bench-a.md`, `bin/bench-b.md`, `bin/bench-c.md`):
+
+- A (throughput): the same `bin/bootstrap.css` (280KB) through every
+  compiler, since plain CSS is valid input for all of them.
+- B (features): the equivalent pair `benchmarks/vs_sassc/features.scss` /
+  `features.bass` (variables, nesting, parent refs, mixins with args,
+  loops, conditionals, color functions, media queries).
+- C (scale): a generated pair, `big.scss` / `big.bass` (~300KB at the
+  default 2000 rules), produced by `benchmarks/vs_sassc/gen_big.py`.
+
+Re-run on your own machine before quoting numbers: absolute times depend
+on hardware and build flags (release).
+
+Known fixture constraints: `$vars` inside opaque raw CSS calls
+(`linear-gradient(to right, $c, ...)`) stay verbatim, runtime `${$var}px`
+interpolation needs a loop or literal base, and construct ordering in
+`features.bass` is load-bearing in spots. `#` is not a comment in BASS (it
+starts an ID selector); the `.bass` fixture uses `//` comments.
+Typed `var()` approximations: the registry is file-global (selector and
+media scoping ignored, last declaration wins), shorthand syntaxes stay
+narrow (`border: var(--w)` with a length errors, same as `border: $w`
+today), and `var()` text smuggled through `$var` strings (rather than a
+real `var()` call) is unchecked. Uppercase `VAR()` stays opaque and
+unvalidated.
+Static color calls keep their source spelling: fully-static `rgb()` /
+`rgba()` / `hsl()`-family calls render verbatim (`rgb(13 110 253)` stays
+space-separated, `rgba(0,0,0,.3)` keeps `,` and `.3`), while dynamic
+forms (any `$var` / `var()` / nested call) evaluate to typed colors and
+render canonically. Static calls nested in `var()` fallbacks stringify
+compactly (`translate3d(0.25em,0,0)`).
 
 ## Documentation
 

@@ -4,7 +4,7 @@
 #          Made by Humans from OpenPeeps
 #          https://github.com/openpeeps/bro
 
-import std/[strutils, tables, macros, options]
+import std/[strutils, tables, sets, macros, options, memfiles, os]
 import pkg/vancode/interpreter/[errors, ast]
 from pkg/openparser/css import loadCssData, getPropertySyntax, CssData
 import pkg/openparser/colors/names as colornames
@@ -19,6 +19,10 @@ type
   Parser* = object
     lex: Lexer
     prev, curr, next: TokenTuple
+    tokBuf: array[64, TokenTuple] # lexer prefetch window, drained via nextToken
+    bufPos, bufFill: int # consumed / valid prefix of tokBuf
+    inCallArgs*: bool # true while parsing call arguments (nested calls)
+    outerIsColorCtor*: bool # innermost call being parsed accepts color args
     inValue*: bool # when true, identifiers are parsed as CSS values, not selectors
     inCaseBlock*: bool # when true, 'of' and 'else' terminate case branches
     inBlockBody*: bool # when true, disables indented-block selector heuristic (inside parseBlock)
@@ -38,15 +42,17 @@ const
   Strings = {tkString}
   Assignables = {tkKeywordTrue, tkKeywordFalse, tkInt, tkFloat, tkIdentifier} + Strings
 
-proc error(tk: TokenTuple, msg: string, fatal = false) =
-  ## Raise a parsing error on the given node.
+proc error(p: var Parser, msg: string, fatal = false) =
+  ## Raise a parsing error at the current token, with source context
+  ## (snippet + caret, json-module style) so the CLI shows where, not just what.
   ## `fatal` errors abort parsing instead of being recovered.
+  let context = p.lex.errorContext(p.curr.pos)
   raise (ref BroParserError)(
           # file: node.file,
-          ln: tk.line,
-          col: tk.col,
+          ln: p.curr.line,
+          col: p.curr.col,
           fatal: fatal,
-          msg: ErrorFmt % ["", $tk.line, $tk.col, msg])
+          msg: "\n" & context & "\n" & ErrorFmt % ["", $p.curr.line, $p.curr.col, msg])
 
 
 const
@@ -66,13 +72,22 @@ const
 #
 # Parser utility functions
 #
+proc nextToken(p: var Parser): TokenTuple =
+  ## Parser token pull: serve from the prefetch window, refilling via the
+  ## batch fill API when drained. Token stream is identical to `getToken`.
+  if p.bufPos >= p.bufFill:
+    p.bufFill = p.lex.getTokens(p.tokBuf)
+    p.bufPos = 0
+  result = move(p.tokBuf[p.bufPos])
+  inc p.bufPos
+
 proc skipNextComment(p: var Parser) =
   # Skip comments until the next token
   # This is used to skip inline comments.
   while true:
     case p.next.kind
     of tkComment:
-      p.next = p.lex.getToken() # skip inline comments
+      p.next = p.nextToken() # skip inline comments
     else: break
 
 template ruleGuard(body) =
@@ -123,13 +138,14 @@ macro prefixHandle(name: untyped, body: untyped) =
 
 proc walk(p: var Parser, offset = 1) =
   # Walk the parser state to the next token.
-  # `offset` is the number of tokens to walk
+  # `offset` is the number of tokens to walk. Token values move through
+  # the window instead of copying, so no refcount churn per step.
   var i = 0
   while offset > i:
     inc i
-    p.prev = p.curr
-    p.curr = p.next
-    p.next = p.lex.getToken()
+    p.prev = move(p.curr)
+    p.curr = move(p.next)
+    p.next = p.nextToken()
     p.skipNextComment()
 
 proc walkOpt(p: var Parser, kind: TokenKind) =
@@ -144,7 +160,7 @@ proc walkOptSemiColon(p: var Parser) =
   if p.curr.kind == tkSemicolon:
     walk(p)
   elif p.curr.kind notin {tkEOF, tkRBrace} and p.curr.line == p.prev.line:
-    p.curr.error("Unexpected token after statement; missing semicolon or newline?")
+    p.error("Unexpected token after statement; missing semicolon or newline?")
 
 template expectWalk(k: TokenKind) =
   if likely(p.curr.kind == k):
@@ -302,7 +318,14 @@ proc convertNamedColor(p: var Parser, val: Node, hexify: bool): Node =
   result = val
   if val == nil or val.kind != nkIdent: return
   if val.ident.len == 0 or val.ident[0] == '$': return
-  let lower = val.ident.toLowerAscii()
+  # Fast path: value idents are nearly always already lowercase — only
+  # allocate the lowered copy when an uppercase char is actually present.
+  var hasUpper = false
+  for c in val.ident:
+    if c in {'A'..'Z'}:
+      hasUpper = true
+      break
+  let lower = if hasUpper: val.ident.toLowerAscii() else: val.ident
   var raw = ""
   if lower == "transparent":
     raw = "transparent"
@@ -336,21 +359,37 @@ proc normVarNode*(node: Node): Node =
       node[1].ident.len > 0:
     node[1].ident = normVarName(node[1].ident)
 
-prefixHandle parseCall:
-  # parse a function call
-  result = ast.newCall(ast.newIdent(p.curr.value))
-  walk p # tkIdentifier
-  # parse function arguments wrapped in parentheses
-  # and mark expectRP as true to expect a closing parenthesis
+const colorCtorFns* = ["linear-gradient", "repeating-linear-gradient",
+  "radial-gradient", "repeating-radial-gradient", "conic-gradient",
+  "repeating-conic-gradient", "drop-shadow", "var"]
+  ## Calls whose arguments accept pre-rendered static colors: gradient
+  ## stops, drop-shadow parts and var() fallbacks render function
+  ## spellings (`rgba(0,0,0,.3)`) verbatim. Compute functions (darken,
+  ## mix, ...) are excluded so nested colors keep evaluating to typed
+  ## values there.
+
+proc parseCallArgs(p: var Parser, result: Node, varNameAsString = false) =
+  ## Shared call-argument loop. With varNameAsString (CSS var()), a leading
+  ## `--name` custom property parses as a string literal — a bare ident
+  ## would miscompile into a variable lookup.
+  let savedInArgs = p.inCallArgs
+  let savedCtor = p.outerIsColorCtor
+  p.inCallArgs = true
+  if result.len > 0 and result[0].kind == nkIdent:
+    p.outerIsColorCtor = result[0].ident in colorCtorFns
+  defer:
+    p.inCallArgs = savedInArgs
+    p.outerIsColorCtor = savedCtor
   var expectRP = p.curr.kind == tkLParen
   if expectRP: walk p # tkLParen
+  var isFirst = true
   if p.curr isnot tkRParen:
     while true:
       # checking for the next token
       case p.curr.kind
       of tkEOF:
         if expectRP:
-          p.curr.error("expected closing ')' for function call", fatal = true)
+          p.error("expected closing ')' for function call", fatal = true)
         break
       of tkRParen:
         if expectRP:
@@ -359,7 +398,10 @@ prefixHandle parseCall:
       of tkComma:
         walk p # skip to next argument
       else:
-        if p.curr.kind == tkIdentifier and p.next.kind == tkAssign:
+        if varNameAsString and isFirst and p.curr.kind == tkCssVar:
+          result.add(ast.newStringLit(p.curr.value))
+          walk p # custom property name
+        elif p.curr.kind == tkIdentifier and p.next.kind == tkAssign:
           # parse a named argument
           let name = ast.newIdent(p.curr.value)
           walk p # tkIdentifier
@@ -370,10 +412,386 @@ prefixHandle parseCall:
         else:
           # parse a normal argument
           let arg = p.convertNamedColor(p.parseExpression(), hexify = false)
-          caseNotNil arg:
+          if arg != nil:
             result.add(arg)
+        isFirst = false
         continue
   else: walk p # tkRParen
+
+proc isStaticColorArg(n: Node): bool =
+  ## True for channel spellings renderable from source: numbers, units
+  ## (percentages), `none`, and slash-alpha infixes of those. Calls,
+  ## variables, named colors and anything else keep the evaluating path
+  ## with its arity/kind errors.
+  if n == nil: return false
+  case n.kind
+  of nkInt, nkFloat, nkUnit: true
+  of nkString: n.stringVal == "none"
+  of nkInfix:
+    n.len >= 3 and n[0].kind == nkIdent and n[0].ident == "/" and
+      isStaticColorArg(n[1]) and isStaticColorArg(n[2])
+  else: false
+
+proc normRawCall(raw: string): string =
+  ## Collapse newlines/indentation to single spaces so multi-line calls
+  ## stay minified; keep ", " for test expectations. Single pass into a
+  ## pre-sized buffer (was: six full-string replace passes + split + join).
+  result = newStringOfCap(raw.len)
+  var pendingSpace = false
+  for c in raw:
+    if c in {' ', '\t', '\n', '\r', '\v', '\f'}:
+      pendingSpace = true
+    elif c == ')':
+      # no space before ')': drop the pending one (and a flushed one, if any)
+      pendingSpace = false
+      if result.len > 0 and result[^1] == ' ':
+        result.setLen(result.len - 1)
+      result.add(')')
+    else:
+      if pendingSpace:
+        pendingSpace = false
+        # no leading space, and none right after '('
+        if result.len > 0 and result[^1] != '(':
+          result.add(' ')
+      result.add(c)
+  # a trailing run never flushes, so no trailing space is possible
+
+proc staticCssText(n: Node): string =
+  ## Render a static (non-dynamic) value subtree to its verbatim CSS text.
+  ## Used by the cssJoin desugar and by parseVarCall for opaque static
+  ## fallbacks. Mirrors codegen `nodeToCssString` for the static subset;
+  ## dynamic parts never reach here (they take cssStr).
+  case n.kind
+  of nkIdent: n.ident
+  of nkInt: $n.intVal
+  of nkFloat:
+    let s = $n.floatVal
+    if s.endsWith(".0"): s[0 ..< s.len - 2] else: s
+  of nkString:
+    if n.stringVal.len > 0 and n.stringVal[0] == '#':
+      n.stringVal
+    else:
+      "\"" & n.stringVal.replace("\"", "\\\"") & "\""
+  of nkUnit:
+    let num = if n[0].kind == nkInt: $n[0].intVal
+      elif n[0].kind == nkFloat:
+        let s = $n[0].floatVal
+        if s.endsWith(".0"): s[0 ..< s.len - 2] else: s
+      else: ""
+    num & n[1].ident
+  of nkColor: n[0].stringVal
+  of nkExprList:
+    var parts: seq[string]
+    for c in n.children: parts.add(staticCssText(c))
+    parts.join(" ")
+  of nkCommaList:
+    var parts: seq[string]
+    for c in n.children: parts.add(staticCssText(c))
+    parts.join(", ")
+  of nkCall:
+    if n.len > 0 and n[0].kind == nkIdent:
+      var args: seq[string]
+      for i in 1 ..< n.len: args.add(staticCssText(n[i]))
+      n[0].ident & "(" & args.join(",") & ")"
+    else: ""
+  of nkInfix:
+    if n.len >= 3:
+      staticCssText(n[1]) & " " & staticCssText(n[0]) & " " &
+        staticCssText(n[2])
+    else: ""
+  of nkPostfix:
+    if n.len >= 2: staticCssText(n[1]) & " !" & n[0].ident
+    else: ""
+  else: ""
+
+const cssStaticRawColorFns* = ["rgb", "rgba", "hsl", "hsla", "hwb",
+  "lab", "lch", "oklab", "oklch"]
+  ## Numeric color constructors whose fully-static calls keep their source
+  ## spelling: separators (`,`, `, `, space) and number forms (`.3`) don't
+  ## survive parsing, and canonical re-rendering would rewrite real-world
+  ## CSS (`rgb(13 110 253)`, `rgba(0,0,0,.3)`). Dynamic calls (any `$var`,
+  ## var() or nested call) keep evaluating to typed colors canonically.
+
+const broValueFnNames* = ["lighten", "darken", "saturate", "desaturate", "spin",
+  "mix", "mixCMYK", "toHex", "toHexAlpha", "toHtmlHex", "parseHex",
+  "parseHexAlpha", "parseHtmlHex", "parseColor", "parseHtmlName",
+  "parseHtmlColor", "distance", "almostEqual", "parseLength", "parseAngle",
+  "parseTime", "parseResolution", "parseFlex", "var",
+  "translate3d", "translate", "translateX", "translateY", "translateZ",
+  "scale", "scaleX", "scaleY", "scaleZ", "scale3d",
+  "rotate", "rotateX", "rotateY", "rotateZ", "rotate3d",
+  "skew", "skewX", "skewY", "matrix", "matrix3d", "perspective",
+  "blur", "brightness", "contrast", "grayscale", "invert", "opacity",
+  "saturate", "sepia", "hue-rotate", "drop-shadow",
+  "linear-gradient", "repeating-linear-gradient",
+  "radial-gradient", "repeating-radial-gradient",
+  "conic-gradient", "repeating-conic-gradient",
+  "circle", "ellipse", "inset", "polygon", "path", "xywh", "ray",
+  "cubic-bezier", "steps", "linear",
+  "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch",
+  "color", "light-dark", "color-mix", "image", "image-set"]
+  ## Bro stdlib procs that construct or combine strictly typed CSS values
+  ## (see stdlib/libcolors, stdlib/libcss). Calls to these names in property
+  ## value position parse as real calls so they evaluate to typed values;
+  ## every other `name(...)` stays opaque raw CSS text (rgb, calc, url, ...).
+  ## Keep in sync with libcss.initCssTypes CSS function registrations.
+
+const cssFnBareKeywords* = ["linear-gradient", "repeating-linear-gradient",
+  "radial-gradient", "repeating-radial-gradient", "conic-gradient",
+  "repeating-conic-gradient", "circle", "ellipse", "inset", "polygon",
+  "path", "xywh", "ray", "steps", "rgb", "rgba", "hsl", "hsla", "hwb",
+  "lab", "lch", "oklab", "oklch", "color"]
+  ## CSS functions whose bare-identifier arguments are keywords, never
+  ## variable reads (bro vars require `$`). Their args stringify at parse
+  ## time so codegen never evaluates them as lookups (`to right` in
+  ## gradients would otherwise die with `undeclared identifier 'to'`).
+
+const cssFnNames* = ["translate3d", "translate", "translateX",
+  "translateY", "translateZ", "scale", "scaleX", "scaleY", "scaleZ",
+  "scale3d", "rotate", "rotateX", "rotateY", "rotateZ", "rotate3d", "skew",
+  "skewX", "skewY", "matrix", "matrix3d", "perspective", "blur",
+  "brightness", "contrast", "grayscale", "invert", "opacity", "saturate",
+  "sepia", "hue-rotate", "drop-shadow", "linear-gradient",
+  "repeating-linear-gradient", "radial-gradient",
+  "repeating-radial-gradient", "conic-gradient", "repeating-conic-gradient",
+  "circle", "ellipse", "inset", "polygon", "path", "xywh", "ray",
+  "cubic-bezier", "steps", "linear",
+  "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch",
+  "color", "light-dark", "color-mix", "image", "image-set"]
+  ## CSS functions registered as real bro procs (see libcss.initCssTypes).
+  ## Extend per wave; keep in sync with the registrations.
+
+const cssFnSlashAlpha* = ["rgb", "rgba", "hsl", "hsla", "hwb", "lab",
+  "lch", "oklab", "oklch", "color"]
+  ## Color functions with modern space syntax and slash alpha:
+  ## `rgb(255 0 0 / 50%)`. A trailing `a / b` infix is the alpha channel;
+  ## it splices into separate args so bodies see components + alpha.
+
+const cssFnOpaqueNested* = ["calc", "calc-size", "env", "attr", "url",
+  "counter", "counters", "symbols", "target-counter", "target-counters",
+  "target-text", "leader", "element", "anchor", "anchor-size", "scroll",
+  "view", "type", "min", "max", "clamp", "round", "mod", "rem", "abs",
+  "sign", "sin", "cos", "tan", "asin", "acos", "atan", "atan2", "pow",
+  "sqrt", "hypot", "log", "exp", "minmax", "fit-content", "cross-fade",
+  "paint", "palette-mix"]
+  ## Functions that stay opaque permanently (expression containers like
+  ## calc, UA/layout-dependent like env/anchor/counters). A real CSS
+  ## function call nesting one of these falls back to verbatim text, so
+  ## `linear-gradient(url(x), red)` keeps working without evaluating url.
+
+let
+  broValueFnSet = toHashSet(broValueFnNames)
+  cssFnBareKeywordsSet = toHashSet(cssFnBareKeywords)
+  cssFnNamesSet = toHashSet(cssFnNames)
+  cssFnSlashAlphaSet = toHashSet(cssFnSlashAlpha)
+  cssFnOpaqueNestedSet = toHashSet(cssFnOpaqueNested)
+  cssStaticRawColorFnsSet = toHashSet(cssStaticRawColorFns)
+  ## Hash-set mirrors of the const name lists above. `in` on a const array
+  ## is a linear scan (up to ~75 string compares); these run on hot paths
+  ## (every value-position call, every call node walked), so O(1) lookup.
+  ## The arrays stay the source of truth (and the exported API).
+
+proc hasOpaqueNestedCall(n: Node): bool =
+  ## True when the subtree calls a permanently-opaque CSS function.
+  if n == nil: return false
+  if n.kind == nkCall and n.len > 0 and n[0].kind == nkIdent and
+      n[0].ident in cssFnOpaqueNestedSet:
+    return true
+  if n.kind == nkCall or n.kind == nkInfix or n.kind == nkExprList or
+      n.kind == nkCommaList or n.kind == nkPostfix or n.kind == nkArray or
+      n.kind == nkBracket or n.kind == nkColon:
+    for c in n.children:
+      if hasOpaqueNestedCall(c): return true
+  false
+
+proc stringifyBareIdents(call: Node) =
+  ## Convert `$`-less bare identifiers in a call's arguments to string
+  ## literals (CSS keywords). Strings render raw through valueToCssText,
+  ## so cached spellings stay exact.
+  for i in 1 ..< call.len:
+    if call[i].kind == nkIdent and call[i].ident.len > 0 and
+        call[i].ident[0] != '$':
+      let kw = ast.newStringLit(call[i].ident)
+      kw.ln = call[i].ln
+      kw.col = call[i].col
+      call[i] = kw
+
+proc valIsDynamic(n: Node): bool =
+  ## True when a value part needs runtime evaluation: a `$var` reference,
+  ## a bro value-function call, or a compound holding one. Opaque raw CSS
+  ## calls (linear-gradient, ...) are single idents and stay verbatim.
+  if n == nil: return false
+  case n.kind
+  of nkIdent:
+    n.ident.len > 0 and n.ident[0] == '$'
+  of nkCall:
+    n.len > 0 and n[0].kind == nkIdent and n[0].ident in broValueFnSet
+  of nkExprList, nkCommaList, nkInfix, nkPostfix, nkUnit, nkBracket, nkArray:
+    for c in n.children:
+      if valIsDynamic(c): return true
+    false
+  else: false
+
+proc isStaticValueTree(n: Node): bool =
+  ## No variables and no calls: renders identically from source text, so
+  ## var() fallbacks can stringify such calls compactly instead of
+  ## evaluating them (`translate3d(0.25em,0,0)` keeps no spaces).
+  if n == nil: return true
+  case n.kind
+  of nkIdent: n.ident.len == 0 or n.ident[0] != '$'
+  of nkCall: false
+  of nkExprList, nkCommaList, nkInfix, nkPostfix, nkUnit, nkBracket,
+     nkArray, nkColon, nkColor:
+    for c in n.children:
+      if not isStaticValueTree(c): return false
+    true
+  else: true
+
+proc parseColorMixCall(p: var Parser, minPrec = 0): Node =
+  ## color-mix(in <space>, color, color): the leading `in` is a keyword
+  ## token, so generic arg parsing cannot handle it. The method name
+  ## stringifies like other bare keywords; colors parse normally.
+  result = ast.newCall(ast.newIdent(p.curr.value))
+  result.ln = p.curr.line
+  result.col = p.curr.col
+  walk p # color-mix
+  if p.curr.kind == tkLParen: walk p # (
+  if p.curr.kind == tkKeywordIn:
+    let kwIn = ast.newStringLit("in")
+    kwIn.ln = p.curr.line
+    kwIn.col = p.curr.col
+    result.add(kwIn)
+    walk p # in
+    if p.curr.kind == tkIdentifier:
+      let space = ast.newStringLit(p.curr.value)
+      space.ln = p.curr.line
+      space.col = p.curr.col
+      result.add(space)
+      walk p # colorspace
+  p.parseCallArgs(result)
+  if p.curr.kind == tkRParen: walk p # )
+
+proc parseVarCall(p: var Parser, minPrec = 0): Node =
+  ## Parse CSS `var(--name[, fallback])` as a real bro call returning
+  ## ttyCssVar, so custom-property names stay atomic and use sites
+  ## type-check structurally. Assumes `p.curr` is tkKeywordVar.
+  result = ast.newCall(ast.newIdent("var"))
+  result.ln = p.curr.line
+  result.col = p.curr.col
+  walk p # var
+  p.parseCallArgs(result, varNameAsString = true)
+  if result.len < 2:
+    p.error("var() expects a custom property name", fatal = true)
+  # Bare identifiers inside var() are CSS keywords (none, auto, solid):
+  # bro variables always require `$`, so a `$`-less ident can never be a
+  # variable read. Without this, codegen evaluates them as lookups and
+  # dies with `undeclared identifier 'none'` on real-world CSS like
+  # `var(--bs-form-select-bg-icon, none)`. Strings render raw through
+  # valueToCssText, so the cached `var(--x, none)` spelling stays exact.
+  # Opaque static calls (translate3d(...)) stringify the same way; bro
+  # calls and dynamic subtrees keep evaluating.
+  stringifyBareIdents(result)
+  for i in 1 ..< result.len:
+    # Opaque calls stringify as before; fully-static bro calls (no vars,
+    # no nested calls) stringify too, compactly instead of evaluating —
+    # unless the static text needs quoting (bare keywords stringified
+    # above are indistinguishable from user-quoted strings there, so
+    # those keep evaluating). Dynamic subtrees keep evaluating with
+    # full kind checking.
+    if result[i].kind == nkCall:
+      if not valIsDynamic(result[i]):
+        let lit = ast.newStringLit(staticCssText(result[i]))
+        lit.ln = result[i].ln
+        lit.col = result[i].col
+        result[i] = lit
+      else:
+        # A bro call with fully-static args (no vars, no nested calls)
+        # stringifies too; anything dynamic keeps evaluating.
+        var argsStatic = true
+        for j in 1 ..< result[i].len:
+          if not isStaticValueTree(result[i][j]):
+            argsStatic = false
+            break
+        if argsStatic:
+          let text = staticCssText(result[i])
+          if '"' notin text:
+            let lit = ast.newStringLit(text)
+            lit.ln = result[i].ln
+            lit.col = result[i].col
+            result[i] = lit
+
+prefixHandle parseCall:
+  # color-mix() leads with the `in` keyword; dedicated parser.
+  if p.curr.value == "color-mix":
+    result = p.parseColorMixCall()
+  else:
+    # parse a function call
+    result = ast.newCall(ast.newIdent(p.curr.value))
+    let namePos = p.curr.pos
+    let nestedArg = p.inCallArgs
+    let ctorNest = p.outerIsColorCtor
+    walk p # tkIdentifier
+    # parse function arguments wrapped in parentheses
+    # and mark expectRP as true to expect a closing parenthesis
+    p.parseCallArgs(result)
+    # CSS functions with keyword arguments (gradients, ...): bare idents
+    # are keywords, stringified so codegen never looks them up as vars.
+    if result.len > 0 and result[0].kind == nkIdent and
+        result[0].ident in cssFnBareKeywordsSet:
+      stringifyBareIdents(result)
+    # A real CSS function call nesting a permanently-opaque function
+    # (calc, url, env, ...) falls back to verbatim text: the opaque part
+    # cannot evaluate, so the whole call stays an opaque ident like
+    # collectRawCall produces.
+    if result.kind == nkCall and result.len > 0 and
+        result[0].kind == nkIdent and result[0].ident in cssFnNamesSet and
+        hasOpaqueNestedCall(result):
+      result = ast.newIdent(staticCssText(result))
+    # Modern slash alpha (`rgb(255 0 0 / 50%)`): a trailing `a / b`
+    # infix is the alpha channel; splice it into separate args so bodies
+    # see components + alpha. Non-trailing slashes (invalid CSS here)
+    # keep evaluating as division.
+    if result.kind == nkCall and result.len > 1 and
+        result[0].kind == nkIdent and result[0].ident in cssFnSlashAlphaSet:
+      let last = result[^1]
+      if last.kind == nkInfix and last.len >= 3 and
+          last[0].kind == nkIdent and last[0].ident == "/":
+        result[^1] = last[1]
+        result.add(last[2])
+    # Fully-static numeric color calls keep their source spelling: arg
+    # separators and number forms are already lost to the AST, so the call
+    # reverts to normalized raw text (same shape collectRawCall produces).
+    # Arity stays enforced (3-4 args only, so `rgb()`/`rgb(5)` still fail
+    # in the impl) and dynamic forms evaluate with full kind checking;
+    # outside value position (var initializers) calls always evaluate to
+    # typed colors for arithmetic.
+    # Shape is position-dependent: direct values become idents (static
+    # paths render them raw), while args nested in color constructors
+    # (gradients, drop-shadow, var()) become strings (call args compile
+    # via lookup, so idents would miscompile). Nested in compute
+    # functions (darken, mix, ...) calls keep evaluating to typed colors.
+    if p.inValue and result.kind == nkCall and result.len > 1 and
+        result[0].kind == nkIdent and
+        result[0].ident in cssStaticRawColorFnsSet and
+        result.len - 1 in {3, 4} and p.prev.kind == tkRParen and
+        (not nestedArg or ctorNest):
+      var allStatic = true
+      for i in 1 ..< result.len:
+        if not isStaticColorArg(result[i]):
+          allStatic = false
+          break
+      if allStatic:
+        let raw = normRawCall(p.lex.lexeme(namePos, p.prev.pos))
+        if nestedArg:
+          let lit = ast.newStringLit(raw)
+          lit.ln = result.ln
+          lit.col = result.col
+          result = lit
+        else:
+          let lit = ast.newIdent(raw)
+          lit.ln = result.ln
+          lit.col = result.col
+          result = lit
 
 prefixHandle parseString:
   # parse a string
@@ -393,20 +811,58 @@ const unitSizeSuffixes* = ["px", "em", "rem", "%", "vh", "vw", "vmin", "vmax",
   "s", "ms", "deg", "rad", "grad", "turn", "dpi", "dpcm", "dppx",
   "Hz", "kHz", "fr", "ch", "ex", "cm", "mm", "in", "pt", "pc"]
 
-const broValueFnNames* = ["lighten", "darken", "saturate", "desaturate", "spin",
-  "mix", "mixCMYK", "toHex", "toHexAlpha", "toHtmlHex", "parseHex",
-  "parseHexAlpha", "parseHtmlHex", "parseColor", "parseHtmlName",
-  "parseHtmlColor", "distance", "almostEqual", "parseLength", "parseAngle",
-  "parseTime", "parseResolution", "parseFlex"]
-  ## Bro stdlib procs that construct or combine strictly typed CSS values
-  ## (see stdlib/libcolors, stdlib/libcss). Calls to these names in property
-  ## value position parse as real calls so they evaluate to typed values;
-  ## every other `name(...)` stays opaque raw CSS text (rgb, var, calc,
-  ## linear-gradient, ...).
+let unitSizeSuffixSet = toHashSet(unitSizeSuffixes)
+  ## O(1) mirror used on the parser hot paths; the array stays exported
+  ## (libcss matches against it too).
+
+proc splitUnitToken(value: string): tuple[num, suffix: string] =
+  ## Split a glued unit token (`10px`, `1x`, `-0.5em`, `1e2px`, `0.5rem`)
+  ## into its numeric prefix and suffix. Mirrors the lexer's number grammar:
+  ## `e`/`E` only counts as an exponent when followed by a digit or
+  ## sign+digit, so `1em` splits as `1`+`em`, never `1e`+`m`.
+  var i = 0
+  if i < value.len and value[i] in {'+', '-'}: inc i
+  while i < value.len and value[i].isDigit(): inc i
+  if i < value.len and value[i] == '.' and i + 1 < value.len and value[i+1].isDigit():
+    inc i
+    while i < value.len and value[i].isDigit(): inc i
+  if i < value.len and value[i] in {'e', 'E'}:
+    var k = i + 1
+    if k < value.len and value[k] in {'+', '-'}: inc k
+    if k < value.len and value[k].isDigit():
+      i = k + 1
+      while i < value.len and value[i].isDigit(): inc i
+  result = (value[0 ..< i], value[i .. ^1])
 
 prefixHandle parseNumber:
   # parse a number (int or float)
   let num = p.curr
+  if p.curr.kind == tkUnit:
+    # Lexer-glued dimension: split the numeric prefix from the suffix and
+    # build nkUnit directly. Unknown suffixes (`1x`) flow through genUnit's
+    # legacy string push, same as before.
+    let (numPart, suffix) = splitUnitToken(num.value)
+    var lit: Node = nil
+    if '.' in numPart or 'e' in numPart or 'E' in numPart:
+      try:
+        lit = ast.newFloatLit(parseFloat(numPart))
+      except ValueError:
+        discard
+    else:
+      try:
+        lit = ast.newIntLit(parseInt(numPart))
+      except ValueError:
+        discard
+    if lit == nil: discard # todo error
+    else:
+      result = ast.newNode(nkUnit).add([lit, ast.newIdent(suffix)])
+      # Stamp manually: the early return below skips the {.rule.} guard,
+      # leaving ln/col at 0, which breaks same-line infix (`4px + 3px`).
+      # The guard stamps the entry token, so this matches its convention.
+      result.ln = num.line
+      result.col = num.col
+    walk p # consume the unit token
+    return
   if p.curr.kind == tkInt:
     result =
       try:
@@ -426,9 +882,12 @@ prefixHandle parseNumber:
       # handle unit suffixes for numbers, e.g., `10px`, `2em`, etc.
       walk p # consume the number token
       let suffix = p.curr.value
-      if suffix in unitSizeSuffixes:
+      if suffix in unitSizeSuffixSet:
         result = ast.newNode(nkUnit).add([result, ast.newIdent(suffix)])
-      walk p # consume the suffix identifier
+        walk p # consume the suffix identifier
+      # Unknown suffixes stay for the next parse step: swallowing them
+      # silently drops input (`1x` became `1`). A following typo ident
+      # now surfaces as a validation error instead of vanishing.
     elif p.next.kind == tkPercent:
       walk p # consume the number token
       result = ast.newNode(nkUnit).add([result, ast.newIdent("%")])
@@ -441,7 +900,7 @@ prefixHandle parseNumber:
 prefixHandle parseMinus:
   # unary minus: -10px, -0.25em, -5
   walk p # tkMinus
-  if p.curr.kind in {tkInt, tkFloat}:
+  if p.curr.kind in {tkInt, tkFloat, tkUnit}:
     result = p.parseNumber()
     caseNotNil result:
       case result.kind
@@ -462,7 +921,7 @@ prefixHandle parseMinus:
 prefixHandle parseUnaryPlus:
   # unary plus: +5px, +.5, +10 — the sign is dropped in CSS output.
   # Only fires when `+` starts an expression (infix `a + b` is unaffected).
-  if p.next.kind in {tkInt, tkFloat}:
+  if p.next.kind in {tkInt, tkFloat, tkUnit}:
     walk p # tkPlus
     result = p.parseNumber()
   else:
@@ -486,15 +945,9 @@ proc collectRawCall(p: var Parser, minPrec = 0): Node =
   if p.curr.kind == tkRParen:
     let endPos = p.curr.pos
     walk p # tkRParen
-    var raw = p.lex.input[startPos .. endPos]
-    # Collapse newlines/indentation to single spaces so multi-line
-    # linear-gradient(...) stays minified; keep ", " for test expectations
-    raw = raw.replace("\r\n", " ").replace("\n", " ").replace("\r", " ").replace("\t", " ")
-    raw = raw.splitWhitespace().join(" ")
-    raw = raw.replace("( ", "(").replace(" )", ")")
-    result = ast.newIdent(raw)
+    result = ast.newIdent(normRawCall(p.lex.lexeme(startPos, endPos)))
   else:
-    p.curr.error("expected closing ')' for function call", fatal = true)
+    p.error("expected closing ')' for function call", fatal = true)
 
 prefixHandle parsePrefix:
   let parseFn = p.getPrefixFn(minPrec)
@@ -574,7 +1027,7 @@ proc parseVarIdent(p: var Parser): Node {.rule.} =
       if p.curr.kind == tkIdentifier:
         ty = p.parseIdent()
       else:
-        p.curr.error("Expected type after ':'")
+        p.error("Expected type after ':'")
     # check for an assignment
     if p.curr.kind == tkAssign:
       walk p  # Consume `=`
@@ -596,7 +1049,7 @@ prefixHandle parseVar:
   of tkKeywordConst:
     result = ast.newNode(nkConst)
   else:
-    p.curr.error(ErrUnexpectedToken % $p.curr.kind)
+    p.error(ErrUnexpectedToken % $p.curr.kind)
   walk p
   result.add(p.parseVarIdent())
   # remember array literals for for-loop unrolling (var $a = [ ... ])
@@ -694,8 +1147,13 @@ proc parseFunctionHead(p: var Parser, isAnon: bool, name, formalParams: var Node
     formalParams[0] = returnType # the return type is stored in the first child
 
 proc parseBlock(p: var Parser, indentPos = 0,
-            parseFnBlock: static bool = false): Node {.rule.} =
-  # parse a block of code
+            parseFnBlock: static bool = false,
+            allowAmpSelector: static bool = false): Node {.rule.} =
+  # parse a block of code.
+  # allowAmpSelector (mixin bodies only) routes `&`-led lines to the
+  # selector parser so `&:hover` works in mixins and resolves against
+  # the call-site parent on splice. It stays off for function bodies,
+  # where `&` is meaningless.
   var
     closingBlock: bool
     closed = false
@@ -732,12 +1190,14 @@ proc parseBlock(p: var Parser, indentPos = 0,
         propNode.ln = propL
         propNode.col = propC
         propNode
+      elif (when allowAmpSelector: p.curr.kind == tkAmp else: false):
+        p.parseBlockSelector(p.curr.col)
       else:
         p.parseExpression()
     caseNotNil subNode:
       stmts.add(subNode)
   if closingBlock and not closed:
-    p.curr.error("expected closing '}' for block", fatal = true)
+    p.error("expected closing '}' for block", fatal = true)
   result = ast.newTree(nkBlock, stmts)
 
 proc parseValueList(p: var Parser): Node =
@@ -783,25 +1243,38 @@ proc parseValueList(p: var Parser): Node =
       walk p # {
       exprNode = p.parseExpression()
       if p.curr.kind == tkRBrace:
+        let rbLine = p.curr.line
         walk p
+        # attached unit suffix, e.g. ${i}px or ${3}em: fold into a unit node.
+        # Loop vars resolve in the for-unroller; literal bases construct
+        # directly. Other dynamic bases fail in genUnit with a clear error.
+        if p.curr.line == rbLine and p.curr.wsno == 0:
+          if p.curr.kind == tkIdentifier and p.curr.value in unitSizeSuffixSet:
+            let suffix = ast.newIdent(p.curr.value)
+            walk p
+            exprNode = ast.newNode(nkUnit).add([exprNode, suffix])
+          elif p.curr.kind == tkPercent:
+            walk p
+            exprNode = ast.newNode(nkUnit).add([exprNode, ast.newIdent("%")])
       # exprNode is the inside expression, will be evaluated
-    # CSS function calls (rgb, var, calc, linear-gradient, url, etc.)
+    # CSS function calls (rgb, calc, linear-gradient, url, etc.)
     # are collected as opaque raw text to preserve internal spacing
     # verbatim for modern CSS syntax like `rgb(13 110 253 / 50%)`.
-    # Calls to known bro value functions (lighten, mix, parseLength, ...)
-    # parse as real calls so they evaluate to strictly typed values.
+    # Calls to known bro value functions (lighten, mix, parseLength, var,
+    # ...) parse as real calls so they evaluate to strictly typed values.
     elif p.curr.kind == tkIdentifier and
         p.next.kind == tkLParen and p.next.line == p.curr.line and p.next.wsno == 0:
-      if p.curr.value in broValueFnNames:
+      if p.curr.value in broValueFnSet:
         exprNode = p.parseCall()
       else:
         exprNode = p.collectRawCall()
     elif p.curr.kind == tkKeywordVar and p.next.kind == tkLParen and p.next.line == p.curr.line:
-      exprNode = p.collectRawCall()
+      exprNode = p.parseVarCall()
     # In value context, true/false/null are rendered as text, not evaluated.
     # e.g. `inherits: true` → `inherits:true;`, `content: null` → `content:null;`
     elif p.inValue and p.curr.kind in {tkKeywordTrue, tkKeywordFalse, tkKeywordNull}:
-      exprNode = ast.newIdent(p.curr.value)
+      # Keyword tokens carry no value; their enum spelling is the source text.
+      exprNode = ast.newIdent($p.curr.kind)
       walk p
     else:
       exprNode = p.parseExpression()
@@ -820,7 +1293,49 @@ proc parseValueList(p: var Parser): Node =
     # Otherwise, continue parsing next value (space-separated)
   if values.len > 0:
     segments.add(values)
-  if segments.len == 1 and segments[0].len == 1:
+  var totalParts = 0
+  var hasDynamic = false
+  for seg in segments:
+    totalParts += seg.len
+    for part in seg:
+      if valIsDynamic(part): hasDynamic = true
+  if totalParts > 1 and hasDynamic:
+    # Dynamic multi-values (`margin: $a $b`, `border: 1px solid $c`)
+    # desugar to a single cssJoin call over an all-string array: every
+    # non-literal part is wrapped in cssStr so it evaluates at runtime
+    # (plain idents like `auto` become string literals since they are not
+    # variables). Separators become literal elements so one call covers
+    # comma lists too; every codegen path already evaluates calls.
+    # Single values keep their existing paths untouched.
+    proc strPart(part: Node): Node =
+      if part == nil: return ast.newStringLit("")
+      case part.kind
+      of nkString: part
+      of nkIdent:
+        if part.ident.len > 0 and part.ident[0] == '$':
+          ast.newCall(ast.newIdent("cssStr"), part)
+        else:
+          ast.newStringLit(part.ident)
+      of nkInfix, nkExprList, nkCommaList, nkPostfix, nkBracket, nkArray,
+         nkUnit, nkColor, nkInt, nkFloat, nkCall:
+        # Composite or literal static parts (center/1em, rgb(...)) render
+        # verbatim; only genuinely dynamic subtrees evaluate via cssStr.
+        if valIsDynamic(part):
+          ast.newCall(ast.newIdent("cssStr"), part)
+        else:
+          ast.newStringLit(staticCssText(part))
+      else:
+        ast.newCall(ast.newIdent("cssStr"), part)
+    var elems: seq[Node]
+    for si, seg in segments:
+      if si > 0: elems.add(ast.newStringLit(", "))
+      for pi, part in seg:
+        if pi > 0: elems.add(ast.newStringLit(" "))
+        elems.add(strPart(part))
+    result = ast.newCall(ast.newIdent("cssJoin"), ast.newNode(nkArray).add(elems))
+    result.ln = segments[0][0].ln
+    result.col = segments[0][0].col
+  elif segments.len == 1 and segments[0].len == 1:
     result = segments[0][0]
   elif segments.len == 1:
     result = ast.newTree(nkExprList, segments[0])
@@ -835,15 +1350,20 @@ proc parseValueList(p: var Parser): Node =
 proc collectAttributeSelector(p: var Parser): string =
   ## Collect a CSS attribute selector `[name=value]` as raw CSS text.
   ## Assumes `p.curr` is `tkLBracket`. Consumes through the closing `]`.
-  result = "["
+  ## Pre-sized buffer with piece-wise adds (no `&` temporaries on the path).
+  result = newStringOfCap(32)
+  result.add('[')
   walk p # tkLBracket
   while p.curr.kind notin {tkRBracket, tkEOF}:
     # preserve whitespace (e.g. `[data-x~=foo i]` — the space before the flag)
     if result.len > 1 and p.curr.wsno > 0 and result[^1] notin {'[', ' '}: # not at start or after [
-      result &= " "
+      result.add(' ')
     case p.curr.kind
-    of tkIdentifier, tkInt, tkFloat: result &= p.curr.value
-    of tkString: result &= "\"" & p.curr.value & "\""
+    of tkIdentifier, tkInt, tkFloat, tkUnit: result.add(p.curr.value)
+    of tkString:
+      result.add('"')
+      result.add(p.curr.value)
+      result.add('"')
     of tkAssign: result &= "="
     of tkTildeAssign: result &= "~="
     of tkCaretAssign: result &= "^="
@@ -938,7 +1458,8 @@ proc collectPseudoSuffix(p: var Parser): string =
     result = "::"
     walk p # second colon
   if p.curr.kind in {tkIdentifier, tkKeywordNot, tkKeywordIs, tkKeywordIsnot}:
-    result &= p.curr.value
+    # Keyword tokens carry no value; their enum spelling is the source text.
+    result &= (if p.curr.value.len > 0: p.curr.value else: $p.curr.kind)
     walk p # identifier
     # functional pseudo-class: :not(...), :is(...), :nth-child(...)
     if p.curr.kind == tkLParen and p.curr.line == p.prev.line:
@@ -1095,7 +1616,7 @@ proc parseSelectorBlock(p: var Parser, indentPos = 0): Node {.rule.} =
           while true:
             case p.curr.kind
             of tkEOF:
-              p.curr.error("expected closing ')' for mixin call", fatal = true)
+              p.error("expected closing ')' for mixin call", fatal = true)
             of tkRParen:
               walk p
               break
@@ -1106,9 +1627,9 @@ proc parseSelectorBlock(p: var Parser, indentPos = 0): Node {.rule.} =
                 # named argument: `$name = value`
                 let nm = ast.newIdent(p.curr.value)
                 walk p, 2
-                callNode.add(ast.newTree(nkColon, nm, p.parseExpression()))
+                callNode.add(ast.newTree(nkColon, nm, p.convertNamedColor(p.parseExpression(), hexify = false)))
               else:
-                let arg = p.parseExpression()
+                let arg = p.convertNamedColor(p.parseExpression(), hexify = false)
                 caseNotNil arg:
                   callNode.add(arg)
               continue
@@ -1131,11 +1652,11 @@ proc parseSelectorBlock(p: var Parser, indentPos = 0): Node {.rule.} =
       caseNotNil subNode:
         props.add(subNode)
   if closingBlock and not closed:
-    p.curr.error("expected closing '}' for block", fatal = true)
+    p.error("expected closing '}' for block", fatal = true)
   if not closingBlock and props.len == 0:
     # indent-style body absent: selector followed by a dedented line, EOF,
     # or garbage — never silently emit an empty rule
-    p.curr.error("expected '{' or an indented block after selector", fatal = true)
+    p.error("expected '{' or an indented block after selector", fatal = true)
   result = ast.newTree(nkBlock, props)
 
 prefixHandle parseWhile:
@@ -1175,7 +1696,7 @@ prefixHandle parseMixin:
   let mixpos = p.curr.col
   walk p # tkKeywordMixin
   if p.curr.kind != tkIdentifier:
-    p.curr.error("expected mixin name after 'mixin'", fatal = true)
+    p.error("expected mixin name after 'mixin'", fatal = true)
     return
   let name = ast.newIdent(p.curr.value)
   walk p
@@ -1190,10 +1711,10 @@ prefixHandle parseMixin:
   else:
     # Indent body requires `=`: `mixin btn(color: color) =`.
     if p.curr isnot tkAssign:
-      p.curr.error("expected '=' after mixin signature", fatal = true)
+      p.error("expected '=' after mixin signature", fatal = true)
       return
     walk p # tkAssign separates the indented body
-  let body: Node = p.parseBlock(mixpos, parseFnBlock = true)
+  let body: Node = p.parseBlock(mixpos, parseFnBlock = true, allowAmpSelector = true)
   caseNotNil body:
     result = ast.newTree(nkMixinDef, name, formalParams, body)
 
@@ -1204,7 +1725,7 @@ prefixHandle parseIf:
   let ifExpr = p.parseExpression()
   caseNotNil ifExpr:
     if p.curr.kind notin {tkColon, tkLBrace}:
-      p.curr.error("expected ':' or '{' after 'if' condition", fatal = true)
+      p.error("expected ':' or '{' after 'if' condition", fatal = true)
     var children = @[ifExpr]
     let ifBlock: Node = p.parseBlock(tk.col)
     caseNotNil ifBlock:
@@ -1218,7 +1739,7 @@ prefixHandle parseIf:
         let elifExpr = p.parseExpression()
         caseNotNil elifExpr:
           if p.curr.kind notin {tkColon, tkLBrace}:
-            p.curr.error("expected ':' or '{' after 'elif' condition", fatal = true)
+            p.error("expected ':' or '{' after 'elif' condition", fatal = true)
           let elifBlock = p.parseBlock(tk.col)
           caseNotNil elifBlock:
             children.add(@[elifExpr, elifBlock])
@@ -1227,7 +1748,7 @@ prefixHandle parseIf:
           break
         walk p # tkKeywordElse
         if p.curr.kind notin {tkColon, tkLBrace}:
-          p.curr.error("expected ':' or '{' after 'else'", fatal = true)
+          p.error("expected ':' or '{' after 'else'", fatal = true)
         let elseBlock = p.parseBlock(tk.col)
         caseNotNil elseBlock:
           children.add(elseBlock)
@@ -1257,7 +1778,7 @@ prefixHandle parseCase:
       let ofVal = p.parseExpression()
       caseNotNil ofVal:
         if p.curr.kind notin {tkColon, tkLBrace}:
-          p.curr.error("expected ':' or '{' after 'of' value", fatal = true)
+          p.error("expected ':' or '{' after 'of' value", fatal = true)
         let ofBlock = p.parseBlock(ofCol)
         caseNotNil ofBlock:
           branches.add(ast.newTree(nkOfBranch, ofVal, ofBlock))
@@ -1270,13 +1791,13 @@ prefixHandle parseCase:
         let elseCol = p.curr.col
         walk p # tkKeywordElse
         if p.curr.kind notin {tkColon, tkLBrace}:
-          p.curr.error("expected ':' or '{' after 'else'", fatal = true)
+          p.error("expected ':' or '{' after 'else'", fatal = true)
         elseBlock = p.parseBlock(elseCol)
     if useBrace:
       if p.curr.kind == tkRBrace:
         walk p # tkRBrace
       else:
-        p.curr.error("expected closing '}' for case block", fatal = true)
+        p.error("expected closing '}' for case block", fatal = true)
     var children = @[subject]
     for b in branches:
       children.add(b)
@@ -1304,7 +1825,7 @@ prefixHandle parseFor:
     p.inForIterable = false
     caseNotNil iterExpr:
       if p.curr.kind notin {tkColon, tkLBrace}:
-        p.curr.error("expected ':' or '{' after 'for' iterable", fatal = true)
+        p.error("expected ':' or '{' after 'for' iterable", fatal = true)
       let body: Node = p.parseBlock(tokenFor.col)
       caseNotNil body:
         # Check for range-based for with interpolated selectors like .col-${size}
@@ -1351,6 +1872,100 @@ prefixHandle parseFor:
                     var bv = try: parseInt(b) except: 0
                     return $(av + bv)
                 return e
+              proc substLoopVal(n: Node, v: int): Node =
+                ## Substitute the range-loop var with iteration `v` in a value
+                ## node, recursing into compounds, then fold constant
+                ## arithmetic and int+suffix pairs into literals. Covers
+                ## `${i}px`, `$i * 1px`, `$i` inside lists. Captures varName.
+                ## Non-loop idents pass through untouched.
+                result = n
+                if n == nil: return
+                case n.kind
+                of nkIdent:
+                  if n.ident == varName or n.ident == "$" & varName:
+                    return ast.newIntLit(v)
+                  if "${" in n.ident:
+                    # legacy ${} string evaluation (e.g. order: ${size + 1});
+                    # kept as an ident so downstream rendering is unchanged
+                    var outVal = ""
+                    let s = n.ident
+                    var i = 0
+                    while i < s.len:
+                      if i+1 < s.len and s[i] == '$' and s[i+1] == '{':
+                        var j = s.find('}', i+2)
+                        if j != -1:
+                          outVal &= evalExpr(s[i+2 .. j-1], v)
+                          i = j+1
+                          continue
+                      outVal &= s[i]
+                      inc i
+                    n.ident = outVal
+                of nkExprList, nkCommaList:
+                  for i in 0 ..< n.len:
+                    n[i] = substLoopVal(n[i], v)
+                  # fold [int, unit-suffix] (from `${i}px`) into a unit literal
+                  if n.kind == nkExprList and n.len == 2 and
+                      n[0].kind == nkInt and n[1].kind == nkIdent and
+                      n[1].ident in unitSizeSuffixSet:
+                    return ast.newNode(nkUnit).add([n[0], n[1]])
+                of nkInfix:
+                  if n.len >= 3:
+                    n[1] = substLoopVal(n[1], v)
+                    n[2] = substLoopVal(n[2], v)
+                    if n[0].kind == nkIdent and n[0].ident in ["+", "-", "*"]:
+                      if n[1].kind == nkInt and n[2].kind == nkInt:
+                        let a = n[1].intVal
+                        let b = n[2].intVal
+                        case n[0].ident
+                        of "+": return ast.newIntLit(a + b)
+                        of "-": return ast.newIntLit(a - b)
+                        else: return ast.newIntLit(a * b)
+                      elif n[0].ident == "*":
+                        if n[1].kind == nkInt and n[2].kind == nkUnit and n[2][0].kind == nkInt:
+                          return ast.newNode(nkUnit).add([ast.newIntLit(n[1].intVal * n[2][0].intVal), n[2][1]])
+                        if n[2].kind == nkInt and n[1].kind == nkUnit and n[1][0].kind == nkInt:
+                          return ast.newNode(nkUnit).add([ast.newIntLit(n[1][0].intVal * n[2].intVal), n[1][1]])
+                of nkCall:
+                  for i in 1 ..< n.len:
+                    n[i] = substLoopVal(n[i], v)
+                of nkArray:
+                  # e.g. the cssJoin desugar array in dynamic multi-values:
+                  # loop-var elements resolve to the iteration int
+                  for i in 0 ..< n.len:
+                    n[i] = substLoopVal(n[i], v)
+                of nkObjectStorage:
+                  for f in n.children:
+                    if f.kind == nkColon and f.len > 1 and f[1] != nil:
+                      f[1] = substLoopVal(f[1], v)
+                of nkUnit:
+                  # e.g. ${i}px folds to nkUnit($i, px) in parseValueList;
+                  # resolve a loop-var base to the iteration int
+                  if n.len >= 1:
+                    n[0] = substLoopVal(n[0], v)
+                of nkPostfix, nkBracket:
+                  for i in 0 ..< n.len:
+                    # [0] of postfix is the operator ident; never the loop var
+                    if n.kind == nkPostfix and i == 0 and n[i].kind == nkIdent: continue
+                    n[i] = substLoopVal(n[i], v)
+                else: discard
+              proc substLoopStmt(stmt: Node, v: int) =
+                ## Apply loop-var substitution to an unrolled body statement:
+                ## property values (recursing into compounds), plus nested
+                ## selector/at-rule blocks. if/case branches keep their own
+                ## selection logic via interpVal. Captures varName.
+                case stmt.kind
+                of nkColon:
+                  if stmt.len > 1 and stmt[1] != nil:
+                    stmt[1] = substLoopVal(stmt[1], v)
+                of nkClassSelector, nkIdSelector, nkPseudoSelector, nkElementSelector:
+                  if stmt.len > 3 and stmt[3] != nil and stmt[3].kind == nkBlock:
+                    for c in stmt[3].children:
+                      substLoopStmt(c, v)
+                of nkAtRule:
+                  if stmt.len > 2 and stmt[2] != nil and stmt[2].kind == nkBlock:
+                    for c in stmt[2].children:
+                      substLoopStmt(c, v)
+                else: discard
               if newChild.kind in {nkClassSelector, nkIdSelector, nkPseudoSelector, nkElementSelector}:
                 var sel = if newChild[0].kind == nkIdent: newChild[0].ident else: ""
                 var isBracket = false
@@ -1375,22 +1990,6 @@ prefixHandle parseFor:
                   newChild[0].ident = outSel
                 # Handle if/elif chain inside the selector's block (for _grid.bass pattern)
                 if newChild.len > 3 and newChild[3].kind == nkBlock:
-                  proc interpVal(n: Node, v: int, varName: string) =
-                    if n.kind == nkColon and n[1] != nil and n[1].kind == nkIdent and "${" in n[1].ident:
-                      var outVal = ""
-                      let s = n[1].ident
-                      var i = 0
-                      while i < s.len:
-                        if i+1 < s.len and s[i] == '$' and s[i+1] == '{':
-                          var j = s.find('}', i+2)
-                          if j != -1:
-                            let expr = s[i+2 .. j-1]
-                            outVal &= evalExpr(expr, v)
-                            i = j+1
-                            continue
-                        outVal &= s[i]
-                        inc i
-                      n[1].ident = outVal
                   var newBlockChildren: seq[Node] = @[]
                   for stmt in newChild[3].children:
                     if stmt.kind == nkIf:
@@ -1402,7 +2001,7 @@ prefixHandle parseFor:
                           if not matched:
                             for c in stmt[k].children:
                               var nc = deepCopy(c)
-                              interpVal(nc, v, varName)
+                              substLoopStmt(nc, v)
                               newBlockChildren.add(nc)
                             matched = true
                           inc k
@@ -1426,7 +2025,7 @@ prefixHandle parseFor:
                           if condTrue and not matched and blk != nil:
                             for c in blk.children:
                               var nc = deepCopy(c)
-                              interpVal(nc, v, varName)
+                              substLoopStmt(nc, v)
                               newBlockChildren.add(nc)
                             matched = true
                           inc k
@@ -1445,7 +2044,7 @@ prefixHandle parseFor:
                           if not matched:
                             for c in branch.children:
                               var nc = deepCopy(c)
-                              interpVal(nc, v, varName)
+                              substLoopStmt(nc, v)
                               newBlockChildren.add(nc)
                             matched = true
                         elif branch.kind == nkOfBranch:
@@ -1459,40 +2058,14 @@ prefixHandle parseFor:
                           if branchMatch and not matched:
                             for c in ofBlock.children:
                               var nc = deepCopy(c)
-                              interpVal(nc, v, varName)
+                              substLoopStmt(nc, v)
                               newBlockChildren.add(nc)
                             matched = true
                     else:
-                      # Handle ${} in property values like order: ${size + 1}
-                      if stmt.kind == nkColon and stmt[1] != nil:
-                        if stmt[1].kind == nkIdent and (stmt[1].ident == varName or stmt[1].ident == "$" & varName):
-                          stmt[1] = ast.newIntLit(v)
-                        elif stmt[1].kind == nkInfix:
-                          let left = if stmt[1][1].kind == nkIdent: stmt[1][1].ident else: ""
-                          let right = if stmt[1][2].kind == nkInt: $stmt[1][2].intVal else: ""
-                          if (left == varName or left == "$" & varName) and right != "":
-                            try:
-                              let rv = parseInt(right)
-                              if stmt[1][0].ident == "+":
-                                stmt[1] = ast.newIntLit(v + rv)
-                              elif stmt[1][0].ident == "-":
-                                stmt[1] = ast.newIntLit(v - rv)
-                            except: discard
-                        elif stmt[1].kind == nkIdent and "${" in stmt[1].ident:
-                          var outVal = ""
-                          let s = stmt[1].ident
-                          var i = 0
-                          while i < s.len:
-                            if i+1 < s.len and s[i] == '$' and s[i+1] == '{':
-                              var j = s.find('}', i+2)
-                              if j != -1:
-                                let expr = s[i+2 .. j-1]
-                                outVal &= evalExpr(expr, v)
-                                i = j+1
-                                continue
-                            outVal &= s[i]
-                            inc i
-                          stmt[1].ident = outVal
+                      # property (or nested) statement: substitute the loop
+                      # var in values, recursing into compounds and folding
+                      # units/arithmetic (covers ${i}px, $i * 1px)
+                      substLoopStmt(stmt, v)
                       newBlockChildren.add(stmt)
                   newChild[3] = ast.newTree(nkBlock, newBlockChildren)
               result.add(newChild)
@@ -2093,7 +2666,7 @@ proc parseKeyframeBlock(p: var Parser, indentPos = 0): Node {.rule.} =
         ast.newEmpty(), ast.newEmpty(), selBlock)
       stmts.add(keyframeNode)
   if closingBlock and not closed:
-    p.curr.error("expected closing '}' for block", fatal = true)
+    p.error("expected closing '}' for block", fatal = true)
   result = ast.newTree(nkBlock, stmts)
 
 prefixHandle parseAtRule:
@@ -2104,7 +2677,7 @@ prefixHandle parseAtRule:
     if p.curr.kind == tkIdentifier: p.curr.value
     elif p.curr.kind == tkKeywordImport: "import"
     else:
-      p.curr.error("Expected at-rule name after @")
+      p.error("Expected at-rule name after @")
       return
   walk p
   var prelude = p.parseAtRulePrelude(atLine)
@@ -2231,7 +2804,7 @@ prefixHandle parseHash:
   let hcol = p.curr.col
   var val = "#"
   walk p # tkHash
-  while p.curr.kind in {tkIdentifier, tkInt, tkFloat} and p.curr.wsno == 0:
+  while p.curr.kind in {tkIdentifier, tkInt, tkFloat, tkUnit} and p.curr.wsno == 0:
     val &= p.curr.value
     walk p
   if val.len == 1:
@@ -2259,13 +2832,13 @@ prefixHandle parseArray:
     if p.curr.kind == tkLBrace:
       let elem = p.parseObjectStorage()
       if elem == nil:
-        p.curr.error("expected object literal in array", fatal = true)
+        p.error("expected object literal in array", fatal = true)
         break
       result.add(elem)
     else:
       let elem = p.parseExpression()
       if elem == nil:
-        p.curr.error("expected expression in array", fatal = true)
+        p.error("expected expression in array", fatal = true)
         break
       result.add(elem)
     if p.curr.kind == tkComma:
@@ -2277,10 +2850,10 @@ prefixHandle parseArray:
       walk p # ]
       break
     elif p.curr.kind == tkEOF:
-      p.curr.error("expected closing ']' for array", fatal = true)
+      p.error("expected closing ']' for array", fatal = true)
       break
     else:
-      p.curr.error("expected ',' or ']' in array", fatal = true)
+      p.error("expected ',' or ']' in array", fatal = true)
       break
 
 prefixHandle parseObjectStorage:
@@ -2301,18 +2874,18 @@ prefixHandle parseObjectStorage:
     of tkString:
       keyNode = ast.newStringLit(p.curr.value)
       walk p
-    of tkInt, tkFloat:
+    of tkInt, tkFloat, tkUnit:
       keyNode = p.parseNumber()
     else:
-      p.curr.error("expected object key", fatal = true)
+      p.error("expected object key", fatal = true)
       break
     if p.curr.kind != tkColon:
-      p.curr.error("expected ':' after object key", fatal = true)
+      p.error("expected ':' after object key", fatal = true)
       break
     walk p # tkColon
     let valNode = p.parseExpression()
     if valNode == nil:
-      p.curr.error("expected value after ':'", fatal = true)
+      p.error("expected value after ':'", fatal = true)
       break
     let colon = ast.newTree(nkColon, keyNode, valNode)
     colon.ln = keyNode.ln
@@ -2327,10 +2900,10 @@ prefixHandle parseObjectStorage:
       walk p # }
       break
     elif p.curr.kind == tkEOF:
-      p.curr.error("expected closing '}' for object", fatal = true)
+      p.error("expected closing '}' for object", fatal = true)
       break
     else:
-      p.curr.error("expected ',' or '}' in object", fatal = true)
+      p.error("expected ',' or '}' in object", fatal = true)
       break
 
 proc getPrefixFn(p: var Parser, minPrec: int): PrefixFunction =
@@ -2349,13 +2922,13 @@ proc getPrefixFn(p: var Parser, minPrec: int): PrefixFunction =
     of tkKeywordVar:
       # `var(...)` in CSS property values is a CSS function, not a declaration
       if p.next.kind == tkLParen and p.next.line == p.curr.line:
-        collectRawCall
+        parseVarCall
       else:
         parseVar
     of tkKeywordConst: parseVar
     of tkCssVar: parseIdent
     of tkString: parseString
-    of tkInt, tkFloat: parseNumber
+    of tkInt, tkFloat, tkUnit: parseNumber
     of tkMinus: parseMinus
     of tkPlus: parseUnaryPlus
     of tkKeywordTrue, tkKeywordFalse: parseBoolLit
@@ -2498,7 +3071,7 @@ prefixHandle parseObject:
     while true:
       case p.curr.kind
       of tkEOF:
-        p.curr.error("expected closing '}' for object", fatal = true)
+        p.error("expected closing '}' for object", fatal = true)
       of tkRBrace:
         walk p; break # end of the object
       of Strings + {tkIdentifier}:
@@ -2548,7 +3121,7 @@ prefixHandle parseStmt:
           result = ast.newTree(nkImport, ast.newStringLit(p.curr.value))
           walk p # tkString
         else:
-          p.curr.error("import expects a string literal path")
+          p.error("import expects a string literal path")
     else: nil
   if prefixFn != nil:
     return prefixFn(p)
@@ -2556,13 +3129,8 @@ prefixHandle parseStmt:
 #
 # Parse Script
 #
-proc parseScript*(astProgram: var Ast, code: sink string, sourcePath: string) =
-  ## Parse the given code into an AST.
-  var p = Parser(lex: newLexer(code))
-  p.curr = p.lex.getToken()
-  p.next = p.lex.getToken()
-  astProgram = Ast()
-  astProgram.sourcePath = sourcePath
+proc parseLoop(p: var Parser, astProgram: var Ast) =
+  ## Shared statement loop for the string and memfile entry points.
   while p.curr.kind != tkEOF:
     # preserve top-level doc-block banners (license headers, section notes);
     # plain comments are skipped as before
@@ -2582,7 +3150,51 @@ proc parseScript*(astProgram: var Ast, code: sink string, sourcePath: string) =
       # reject bare literals/identifiers at document level — they produce no
       # CSS and usually indicate a typo (e.g. `$$$` or a stray number)
       if node.kind in {nkIdent, nkInt, nkFloat, nkString, nkBool, nkColor}:
-        p.curr.error("unexpected statement at document level", fatal = true)
+        p.error("unexpected statement at document level", fatal = true)
       astProgram.nodes.add(node)
     do:
-      p.curr.error(ErrUnexpectedToken % $p.curr.kind, fatal = true)
+      p.error(ErrUnexpectedToken % $p.curr.kind, fatal = true)
+
+proc parseScript*(astProgram: var Ast, code: sink string, sourcePath: string) =
+  ## Parse the given code into an AST.
+  var p = Parser(lex: newLexer(code))
+  p.curr = p.nextToken()
+  p.next = p.nextToken()
+  astProgram = Ast()
+  astProgram.sourcePath = sourcePath
+  p.parseLoop(astProgram)
+
+proc errorContextFor*(filePath: string, ln, col: int): string =
+  ## Source snippet for errors raised without lexer access (codegen).
+  ## Re-reads the file; error path only. CodeGenError carries no filename,
+  ## so context resolves against the entry file — errors inside imports
+  ## may point at the wrong line.
+  try:
+    let text = readFile(filePath)
+    if text.len == 0: return ""
+    var pos = 0
+    var line = 1
+    while line < ln and pos < text.len:
+      if text[pos] == '\n': inc line
+      inc pos
+    var lex = newLexer(text)
+    result = "\n" & lex.errorContext(min(pos + col, text.len)) & "\n"
+  except CatchableError:
+    result = ""
+
+proc parseScriptFile*(astProgram: var Ast, path: string) =
+  ## Parse a `.bass`/`.css` file into an AST via a memory-mapped read.
+  ## The mapping closes before returning; token values are copied out, so
+  ## holding the AST afterwards is safe.
+  # Empty files cannot be memory-mapped; parse them as empty input.
+  if getFileSize(path) == 0:
+    parseScript(astProgram, "", path)
+    return
+  var mf = memfiles.open(path, fmRead)
+  defer: mf.close()
+  var p = Parser(lex: newLexer(mf.mem, mf.size))
+  p.curr = p.nextToken()
+  p.next = p.nextToken()
+  astProgram = Ast()
+  astProgram.sourcePath = path
+  p.parseLoop(astProgram)

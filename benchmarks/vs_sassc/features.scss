@@ -1,0 +1,58 @@
+// bro vs sassc: feature-equivalent pair (Suite B).
+// Keep constructs to the intersection of BASS and SCSS:
+// variables, nesting, &-parent refs, mixins with args, loops,
+// conditionals, color functions, media queries.
+// Rule order mirrors features.bass; the bench asserts the
+// normalized outputs are identical (see bench.sh normalize_css).
+
+$primary: #0d6efd;
+$radius: 4px;
+$debug: true;
+
+@mixin btn($color) {
+  color: $color;
+  border-radius: $radius;
+}
+
+@for $i from 1 through 20 {
+  .z-#{$i} {
+    z-index: #{$i};
+  }
+}
+
+.btn {
+  @include btn($primary);
+  &:hover {
+    color: darken($primary, 10%);
+  }
+}
+.btn-danger {
+  @include btn(red);
+  &:hover {
+    color: darken(red, 10%);
+  }
+}
+
+.card {
+  color: #333;
+  .title {
+    font-size: 1.25rem;
+    font-weight: bold;
+  }
+}
+
+@if $debug {
+  .card-debug {
+    outline: 1px solid blue;
+  }
+} @else {
+  .card-fallback {
+    outline: 0;
+  }
+}
+
+@media (min-width: 768px) {
+  .card {
+    display: flex;
+  }
+}

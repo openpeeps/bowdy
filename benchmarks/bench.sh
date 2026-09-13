@@ -1,122 +1,67 @@
 #!/usr/bin/env bash
+# Head-to-head: sassc vs bro vs bro --strict vs dart-sass, all via CLI.
 #
-# Benchmark Bro — bro only (no zaiku)
+#   benchmarks/bench.sh                     # all three suites
+#   benchmarks/bench.sh --warmup=2 --runs=5
+#   benchmarks/bench.sh --big-count=500     # smaller Suite C
 #
-# Two suites:
-#   1) macro  — bin/bootstrap.css 280kB → parse/validate/minified + sourcemap
-#   2) micro  — dummy small pieces covering nesting/&/mixins/loops/raw-calls etc.
-#
-# Also keeps the legacy synthetic scaling bench for throughput history.
-#
-# Usage:
-#   benchmarks/bench.sh                      # all suites
-#   benchmarks/bench.sh --macro-only         # only bootstrap macro
-#   benchmarks/bench.sh --micro-only         # only micro
-#   benchmarks/bench.sh --count N --warmup N --runs N   # synthetic opts
-#   benchmarks/bench.sh --help
-#
-# Requires: Nim toolchain (nimble), optional: hyperfine for CLI timing.
-#
+# Suites: A) same input (bin/bootstrap.css, valid for every compiler),
+# B) equivalent features pair, C) generated scale pair (gen_big.py).
+# dart-sass (benchmarks/dart-sass/sass, gitignored) runs when present.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-COUNT="${COUNT:-2000}"
-WARMUP="${WARMUP:-3}"
-RUNS="${RUNS:-5}"
+WARMUP=3
+RUNS=10
+BIG_COUNT=2000
+VS_DIR="benchmarks/vs_sassc"
+DARTSASS="benchmarks/dart-sass/sass"
 BOOTSTRAP="bin/bootstrap.css"
-DO_MACRO=1
-DO_MICRO=1
-DO_SYNTH=0
-DO_HYPERFINE=0
 
 for arg in "$@"; do
   case "$arg" in
-    --macro-only) DO_MICRO=0; DO_SYNTH=0 ;;
-    --micro-only) DO_MACRO=0; DO_SYNTH=0 ;;
-    --synthetic) DO_SYNTH=1 ;;
-    --synthetic-only) DO_MACRO=0; DO_MICRO=0; DO_SYNTH=1 ;;
-    --hyperfine) DO_HYPERFINE=1 ;;
-    --count=*) COUNT="${arg#*=}" ;;
     --warmup=*) WARMUP="${arg#*=}" ;;
     --runs=*) RUNS="${arg#*=}" ;;
-    --help|-h)
-      echo "Usage: benchmarks/bench.sh [options]"
-      echo "  --macro-only     only bootstrap macro bench"
-      echo "  --micro-only     only micro benches"
-      echo "  --synthetic      also run synthetic scaling bench"
-      echo "  --synthetic-only only synthetic bench"
-      echo "  --hyperfine      also run hyperfine on bro CLI (if installed)"
-      echo "  --count=N        synthetic component count (default $COUNT)"
-      echo "  --warmup=N       hyperfine warmup (default $WARMUP)"
-      echo "  --runs=N         hyperfine runs (default $RUNS)"
-      exit 0
-      ;;
+    --big-count=*) BIG_COUNT="${arg#*=}" ;;
+    --help|-h) sed -n '2,8p' "$0"; exit 0 ;;
+    *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
 
-echo "==> building bro + benches (release)"
-nimble build -d:release >/dev/null 2>&1 || echo "  (nimble build warnings, continuing)"
-# Use clue's local vancode/openparser paths (develop-linked) to match `clue build`
-nim c --path:/Users/georgelemon/Development/packages/vancode/src --path:/Users/georgelemon/Development/packages/openparser/src -d:release --deepcopy:on --hints:off -o:bin/bench_bootstrap benchmarks/bench_bootstrap.nim 2>/dev/null || nim c --path:/Users/georgelemon/Development/packages/vancode/src --path:/Users/georgelemon/Development/packages/openparser/src -d:release --deepcopy:on -o:bin/bench_bootstrap benchmarks/bench_bootstrap.nim 2>&1 | tail -n 5
-nim c --path:/Users/georgelemon/Development/packages/vancode/src --path:/Users/georgelemon/Development/packages/openparser/src -d:release --deepcopy:on --hints:off -o:bin/bench_micro benchmarks/bench_micro.nim 2>/dev/null || nim c --path:/Users/georgelemon/Development/packages/vancode/src --path:/Users/georgelemon/Development/packages/openparser/src -d:release --deepcopy:on -o:bin/bench_micro benchmarks/bench_micro.nim 2>&1 | tail -n 5
-
-if [ "$DO_MACRO" = 1 ]; then
-  echo ""
-  echo "━━━ macro: $BOOTSTRAP (load→parse→validate→minified + sourcemap) ━━━"
-  if [ ! -f "$BOOTSTRAP" ]; then
-    echo "  skip: $BOOTSTRAP not found" >&2
-  else
-    # single breakdown
-    ./bin/bench_bootstrap --iterations 1 --warmup 0
-    echo "--- median over 10 runs (minified / minified+map / pretty) ---"
-    ./bin/bench_bootstrap --iterations 10 --warmup 3
-    ./bin/bench_bootstrap --iterations 10 --warmup 3 --map
-    ./bin/bench_bootstrap --iterations 10 --warmup 3 --pretty --map
-  fi
+for cmd in sassc hyperfine python3; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "missing: $cmd" >&2; exit 1; }
+done
+if [ ! -x bin/bro ]; then
+  echo "building bro (release)..."
+  clue build --release
 fi
 
-if [ "$DO_MICRO" = 1 ]; then
-  echo ""
-  echo "━━━ micro: dummy small pieces (nesting, &, mixins, loops, etc.) ━━━"
-  ./bin/bench_micro --iterations 500 --warmup 50
-fi
+HAS_DART=0
+[ -x "$DARTSASS" ] && HAS_DART=1
 
-if [ "$DO_SYNTH" = 1 ]; then
-  echo ""
-  echo "━━━ synthetic scaling (legacy) — ~$COUNT components ━━━"
-  mkdir -p tests/data
-  nim c --path:/Users/georgelemon/Development/packages/vancode/src --path:/Users/georgelemon/Development/packages/openparser/src -d:release --deepcopy:on --hints:off -o:bin/benchmark benchmarks/benchmark.nim 2>/dev/null || nim c --path:/Users/georgelemon/Development/packages/vancode/src --path:/Users/georgelemon/Development/packages/openparser/src -d:release --deepcopy:on --hints:off benchmarks/benchmark.nim >/dev/null
-  ./bin/benchmark --count "$COUNT" >/dev/null 2>&1 || true
-  if [ ! -f tests/data/bench.bass ]; then
-    echo "  (using bin/style.bass as fallback)" >&2
-    cp bin/style.bass tests/data/bench.bass 2>/dev/null || true
+# $1=report $2=tag $3=scss-input $4=bass-input
+suite() {
+  local report="$1" tag="$2" scss="$3" bass="$4"
+  local cmd=(hyperfine --warmup "$WARMUP" --runs "$RUNS" --export-markdown "$report")
+  cmd+=(--command-name "sassc" "sassc -t compressed $scss /tmp/bench-$tag-sassc.css")
+  cmd+=(--command-name "bro" "./bin/bro c $bass -o:/tmp/bench-$tag-bro.css")
+  cmd+=(--command-name "bro --strict" "./bin/bro c --strict $bass -o:/tmp/bench-$tag-strict.css")
+  if [ "$HAS_DART" = 1 ]; then
+    cmd+=(--command-name "dart-sass" "$DARTSASS --style=compressed $scss /tmp/bench-$tag-dart.css 2>/dev/null")
   fi
-  if [ -f tests/data/bench.bass ]; then
-    echo "  input: $(du -h tests/data/bench.bass | cut -f1) $(wc -l < tests/data/bench.bass) lines"
-    ./bin/benchmark --count "$COUNT" 2>/dev/null | tail -n 5 || ./bin/benchmark 2>/dev/null | tail -n 5 || true
-  fi
-fi
+  "${cmd[@]}"
+  wc -c /tmp/bench-$tag-*.css
+}
 
-if [ "$DO_HYPERFINE" = 1 ]; then
-  if ! command -v hyperfine >/dev/null 2>&1; then
-    echo "hyperfine not installed — skip CLI timing" >&2
-  else
-    echo ""
-    echo "━━━ hyperfine: bro compile $BOOTSTRAP ━━━"
-    mkdir -p bin
-    hyperfine \
-      --warmup "$WARMUP" \
-      --runs "$RUNS" \
-      --export-markdown bin/bench-results.md \
-      --command-name "bro compile $BOOTSTRAP" \
-      -- "cd \"$PWD\" && ./bin/bro compile ./$BOOTSTRAP -o /tmp/bro-bench.css 2>/dev/null || ./bin/bro compile ./$BOOTSTRAP 2>/dev/null | wc -c >/dev/null"
-    echo "results written to bin/bench-results.md"
-    cat bin/bench-results.md 2>/dev/null || true
-  fi
-fi
+echo "━━━ A: same input ($BOOTSTRAP) ━━━"
+suite bin/bench-a.md a "$BOOTSTRAP" "$BOOTSTRAP"
 
-echo ""
-echo "Done. Binaries: bin/bench_bootstrap, bin/bench_micro, bin/bro"
-echo "  quick: bin/bench_bootstrap --iterations 20 --map --pretty"
-echo "  quick: bin/bench_micro --filter nesting --iterations 5000"
+echo "━━━ B: features pair ━━━"
+suite bin/bench-b.md b "$VS_DIR/features.scss" "$VS_DIR/features.bass"
+
+echo "━━━ C: scale pair ($BIG_COUNT rules) ━━━"
+python3 "$VS_DIR/gen_big.py" --count "$BIG_COUNT" --out "$VS_DIR"
+suite bin/bench-c.md c "$VS_DIR/big.scss" "$VS_DIR/big.bass"
+
+echo "reports: bin/bench-a.md bin/bench-b.md bin/bench-c.md"

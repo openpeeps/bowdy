@@ -22,6 +22,9 @@ proc loadFullStdlib(script: Script, module: Module) =
 proc compile(code: string): string =
   var program: Ast
   parser.parseScript(program, code, "test.bass")
+  codegen.strictCss = true # suite default mirrors `bro c --strict`
+  codegen.resetCustomProps()
+  codegen.collectCustomProps(program)
 
   let mainChunk = newChunk("test.bass")
   var script = newScript(mainChunk)
@@ -40,10 +43,14 @@ proc compileFile(path: string): string =
   ## Full pipeline for a real file on disk — mirrors the CLI build path,
   ## including the import parserCallback so `.bass` imports resolve.
   proc cb(astProgram: var Ast, p: string, resolver: FileResolver) =
-    parser.parseScript(astProgram, readFile(p), p)
+    parser.parseScriptFile(astProgram, p)
+    codegen.collectCustomProps(astProgram)
 
   var program: Ast
-  parser.parseScript(program, readFile(path), path)
+  parser.parseScriptFile(program, path)
+  codegen.strictCss = true # suite default mirrors `bro c --strict`
+  codegen.resetCustomProps()
+  codegen.collectCustomProps(program)
   let mainChunk = newChunk(path)
   var script = newScript(mainChunk)
   var module = newModule(path.extractFilename, some(path))
@@ -938,6 +945,75 @@ suite "Phase 5: mixins":
     expect CatchableError:
       discard compile("mixin btn(color: color)\n  color: $color\n.a\n  @btn(red)")
 
+  test "parse error carries source context":
+    var msg = ""
+    try:
+      discard compile(".a { color: red;")
+    except CatchableError as e:
+      msg = e.msg
+    check msg.len > 0
+    check ".a { color: red;" in msg
+    check "^" in msg
+    check "(1:16)" in msg
+
+  test "errorContextFor renders snippet and caret from file":
+    let path = currentSourcePath().parentDir / "stylesheets" / "import_main.bass"
+    let ctx = parser.errorContextFor(path, 2, 0)
+    check ".a" in ctx
+    check "^" in ctx
+
+  test "mixin body resolves outer length var":
+    check compile("var $radius = 4px\nmixin btn(color: color) =\n  color: $color\n  border-radius: $radius\n.a\n  @btn(red)") ==
+      ".a{color:#ff0000;border-radius:4px}"
+
+  test "mixin arg accepts outer color var":
+    check compile("var $primary = #0d6efd\nmixin btn(color: color) =\n  color: $color\n.a\n  @btn($primary)") ==
+      ".a{color:#0d6efd}"
+
+  test "mixin bro-call with named color arg":
+    check compile("mixin m(c: color) =\n  color: darken($c, 10)\n.a\n  @m(red)") ==
+      ".a{color:#cc0000}"
+
+  test "mixin nested selector resolves outer var":
+    check compile("var $primary = #0d6efd\nmixin card =\n  .icon\n    color: $primary\n.a\n  @card()") ==
+      ".a .icon{color:#0d6efd}"
+
+  test "mixin parent ref in indented body":
+    check compile("mixin btn(color: color) =\n  color: $color\n  &:hover\n    color: blue\n.a\n  @btn(red)") ==
+      ".a{color:#ff0000}.a:hover{color:#0000ff}"
+
+  test "mixin parent ref in brace body":
+    check compile("mixin btn(color: color) {\n  color: $color\n  &:hover\n    color: blue\n}\n.a {\n  @btn(red)\n}") ==
+      ".a{color:#ff0000}.a:hover{color:#0000ff}"
+
+  test "comments interleaved with loops and nesting":
+    check compile("// lead\nvar $debug = true\nfor $i in range(1, 2):\n  .z-${$i}\n    z-index: $i\n// mid\n.card\n  color: #333\n  // inner\n  .title\n    font-weight: bold\n// trail") ==
+      ".z-1{z-index:1}.z-2{z-index:2}.card{color:#333}.card .title{font-weight:bold}"
+
+  test "multi-value with vars evaluates":
+    check compile("var $a = 1px\nvar $b = 2px\n.a\n  margin: $a $b") ==
+      ".a{margin:1px 2px}"
+
+  test "multi-value mixing literals and vars":
+    check compile("var $c = red\n.a\n  border: 1px solid $c") ==
+      ".a{border:1px solid #ff0000}"
+
+  test "multi-value comma list with vars":
+    check compile("var $c = red\nvar $d = blue\n.a\n  box-shadow: 0 1px $c, inset 0 0 $d") ==
+      ".a{box-shadow:0 1px #ff0000, inset 0 0 #0000ff}"
+
+  test "multi-value with vars in mixin body":
+    check compile("var $a = 1px\nvar $b = 2px\nmixin m =\n  margin: $a $b\n.a\n  @m()") ==
+      ".a{margin:1px 2px}"
+
+  test "multi-value with loop var and static":
+    check compile("for $i in range(1, 3):\n  .p-${$i}\n    margin: ${$i}px auto") ==
+      ".p-1{margin:1px auto}.p-2{margin:2px auto}.p-3{margin:3px auto}"
+
+  test "static multi-value still validates strictly":
+    expect CatchableError:
+      discard compile(".a\n  width: 0 foo")
+
 suite "Phase 5: control flow inside rule bodies":
   test "if true emits contained property":
     check compile(".a\n  if true:\n    color: red") == ".a{color:#ff0000}"
@@ -954,6 +1030,21 @@ suite "Phase 5: control flow inside rule bodies":
   test "for range loop emits repeated properties":
     check compile(".a\n  for $i in range(1, 3):\n    z-index: $i") == ".a{z-index:1;z-index:2;z-index:3}"
 
+  test "loop var with attached unit suffix":
+    check compile("for $i in range(1, 3):\n  .p-${$i}\n    padding: ${$i}px") ==
+      ".p-1{padding:1px}.p-2{padding:2px}.p-3{padding:3px}"
+
+  test "loop var arithmetic with units":
+    check compile("for $i in range(1, 3):\n  .p-${$i}\n    padding: $i * 1px") ==
+      ".p-1{padding:1px}.p-2{padding:2px}.p-3{padding:3px}"
+
+  test "loop var arithmetic with units reversed":
+    check compile("for $i in range(1, 3):\n  .p-${$i}\n    padding: 1px * $i") ==
+      ".p-1{padding:1px}.p-2{padding:2px}.p-3{padding:3px}"
+
+  test "interpolation with attached literal unit":
+    check compile(".a\n  width: ${3}px") == ".a{width:3px}"
+
   test "for over array of objects":
     check compile("var $s = [{k: 0, v: 0}, {k: 1, v: 0.25rem}]\nfor $item in $s:\n  .p-${$item.k}\n    padding: $item.v") == ".p-0{padding:0}.p-1{padding:0.25rem}"
 
@@ -962,6 +1053,16 @@ suite "Phase 5: control flow inside rule bodies":
 
   test "control flow with surrounding properties":
     check compile("var $on = true\n.a\n  color: red\n  if $on:\n    top: 1px\n  background: blue") == ".a{color:#ff0000;top:1px;background:#0000ff}"
+
+  test "property before taken if keeps separator":
+    check compile("var $on = true\n.a\n  color: red\n  if $on:\n    outline: 1px") == ".a{color:#ff0000;outline:1px}"
+
+  test "property before untaken if has no trailing semicolon":
+    check compile("var $on = false\n.a\n  color: red\n  if $on:\n    outline: 1px") == ".a{color:#ff0000}"
+
+  test "if inside nested rule stays inside the block":
+    check compile("var $on = true\n.card\n  color: red\n  .title\n    font-weight: bold\n  if $on:\n    outline: 1px") ==
+      ".card{color:#ff0000;outline:1px}.card .title{font-weight:bold}"
 
   test "while loop with counter":
     check compile("var $i = 0\n.a\n  while $i < 2\n    z-index: $i\n    $i = $i + 1") == ".a{z-index:0;z-index:1}"
@@ -1000,9 +1101,12 @@ suite "Phase 6: modules (.bass imports)":
   test "sourcemap segments attribute imported file correctly":
     proc compileFileVm(path: string): tuple[css: string, vm: Vm] =
       proc cb(astProgram: var Ast, p: string, resolver: FileResolver) =
-        parser.parseScript(astProgram, readFile(p), p)
+        parser.parseScriptFile(astProgram, p)
+        codegen.collectCustomProps(astProgram)
       var program: Ast
-      parser.parseScript(program, readFile(path), path)
+      parser.parseScriptFile(program, path)
+      codegen.resetCustomProps()
+      codegen.collectCustomProps(program)
       let mainChunk = newChunk(path)
       var script = newScript(mainChunk)
       var module = newModule(path.extractFilename, some(path))
@@ -1034,6 +1138,9 @@ proc compilePretty(code: string): string =
   ## compile() with --pretty semantics: VM emits newlines + indentation.
   var program: Ast
   parser.parseScript(program, code, "test.bass")
+  codegen.strictCss = true # suite default mirrors `bro c --strict`
+  codegen.resetCustomProps()
+  codegen.collectCustomProps(program)
   let mainChunk = newChunk("test.bass")
   var script = newScript(mainChunk)
   var module = newModule("test", some("test.bass"))
@@ -1106,3 +1213,225 @@ suite "Phase 6: doc-block preservation":
   test "pretty mode banner inside nested rule body":
     check compilePretty(".p\n  color: red\n  .c\n    color: blue") ==
       ".p{\n  color:#ff0000\n}\n.p .c{\n  color:#0000ff\n}\n"
+
+suite "Phase 6: typed var() references":
+  test "size custom prop in color position errors":
+    expect CatchableError:
+      discard compile(":root\n  --fs-medium: 1rem\n.card\n  color: var(--fs-medium)")
+
+  test "color custom prop in color position passes":
+    check compile(":root\n  --brand: red\n.card\n  color: var(--brand)") ==
+      ":root{--brand:red}.card{color:var(--brand)}"
+
+  test "undeclared var warns but compiles":
+    var warned: seq[string] = @[]
+    let prevHandler = codegen.warnHandler
+    codegen.warnHandler = proc(msg: string) {.gcsafe.} =
+      {.cast(gcsafe).}: # single-threaded suite: safe to record locally
+        warned.add(msg)
+    try:
+      check compile(".card\n  color: var(--missing)") ==
+        ".card{color:var(--missing)}"
+    finally:
+      codegen.warnHandler = prevHandler
+    check warned.len == 1
+    check "var(--missing) is not declared" in warned[0]
+
+  test "unknown var with matching fallback compiles":
+    check compile(".a\n  color: var(--missing, red)") ==
+      ".a{color:var(--missing, #ff0000)}"
+
+  test "unknown var with mismatching fallback errors":
+    expect CatchableError:
+      discard compile(".a\n  color: var(--missing, 2px)")
+
+  test "declared mismatch errors even with matching fallback":
+    expect CatchableError:
+      discard compile(":root\n  --size: 2px\n.a\n  color: var(--size, red)")
+
+  test "color custom prop in length position errors":
+    expect CatchableError:
+      discard compile(":root\n  --brand: red\n.w\n  width: var(--brand)")
+
+  test "compound value with mistyped var errors":
+    # A time inhabits no border slot, so it errors. (A length would pass:
+    # border accepts lengths via <line-width>; kinds checking is blind to
+    # which shorthand slot a var lands in.)
+    expect CatchableError:
+      discard compile(":root\n  --bad: 2s\n.b\n  border: 1px solid var(--bad)")
+
+  test "chained var alias resolves":
+    expect CatchableError:
+      discard compile(":root\n  --a: 1px\n  --b: var(--a)\n.c\n  color: var(--b)")
+
+  test "bro var alias resolves":
+    check compile("var $c = red\n:root\n  --a: $c\n.b\n  color: var(--a)") ==
+      ":root{--a:#ff0000}.b{color:var(--a)}"
+
+  test "bro call declaration infers color":
+    check compile(":root\n  --d: darken(red, 10)\n.c\n  color: var(--d)") ==
+      ":root{--d:#cc0000}.c{color:var(--d)}"
+
+  test "keyword declaration stays unchecked":
+    check compile(":root\n  --t: transparent\n.a\n  color: var(--t)") ==
+      ":root{--t:transparent}.a{color:var(--t)}"
+
+  test "bare number declaration coerces to length":
+    check compile(":root\n  --n: 2\n.w\n  width: var(--n)") ==
+      ":root{--n:2}.w{width:var(--n)}"
+
+  test "use before declaration registers":
+    check compile(".a\n  color: var(--later)\n:root\n  --later: red") ==
+      ".a{color:var(--later)}:root{--later:red}"
+
+  test "nested fallback var is checked":
+    expect CatchableError:
+      discard compile(":root\n  --sz: 2px\n.a\n  color: var(--x, var(--sz))")
+
+  test "env() is untouched":
+    check compile(".e\n  padding-top: env(safe-area-inset-top)") ==
+      ".e{padding-top:env(safe-area-inset-top)}"
+
+  test "keyword-named custom props stay atomic":
+    check compile(":root\n  --color-gray-100: #f8f9fa\n.c\n  background: var(--color-gray-100)") ==
+      ":root{--color-gray-100:#f8f9fa}.c{background:var(--color-gray-100)}"
+
+  test "keyword-only custom prop name stays verbatim":
+    check compile(":root\n  --red: red\n.c\n  color: var(--red)") ==
+      ":root{--red:red}.c{color:var(--red)}"
+
+  test "hyphenated custom prop in length position":
+    check compile(":root\n  --red-500: 2px\n.w\n  width: var(--red-500)") ==
+      ":root{--red-500:2px}.w{width:var(--red-500)}"
+
+  test "keyword-named prop in compound value":
+    check compile(":root\n  --brand-gray: #333\n.b\n  border: 1px solid var(--brand-gray)") ==
+      ":root{--brand-gray:#333}.b{border:1px solid var(--brand-gray)}"
+
+  test "var name from $var renders":
+    check compile("var $n = \"--brand\"\n:root\n  --brand: red\n.c\n  color: var($n)") ==
+      ":root{--brand:red}.c{color:var(--brand)}"
+
+  test "empty var() is a parse error":
+    expect CatchableError:
+      discard compile(".a\n  color: var()")
+
+  test "fallback message names the var":
+    var msg = ""
+    try:
+      discard compile(".a\n  color: var(--nope, 2px)")
+    except CatchableError as e:
+      msg = e.msg
+    check "var(--nope)" in msg
+    check "fallback" in msg
+
+  test "loop var as var() fallback":
+    check compile("for $i in range(1, 2):\n  .z-${$i}\n    z-index: var(--z, $i)") ==
+      ".z-1{z-index:var(--z, 1)}.z-2{z-index:var(--z, 2)}"
+
+  test "keyword fallback stays verbatim":
+    check compile(".a\n  color: var(--x, none)") ==
+      ".a{color:var(--x, none)}"
+
+  test "opaque call fallback stays verbatim":
+    check compile(".a\n  transform: var(--x, translate3d(0.25em, 0, 0))") ==
+      ".a{transform:var(--x, translate3d(0.25em,0,0))}"
+
+  test "keywords in dynamic compound stay verbatim":
+    check compile(".a\n  background: transparent var(--x) center/1em auto no-repeat") ==
+      ".a{background:transparent var(--x) center / 1em auto no-repeat}"
+
+  test "glued units compile":
+    check compile(".a\n  color: #0d6efd\n  width: 10px\n  margin: -0.25em 1e2px .5rem") ==
+      ".a{color:#0d6efd;width:10px;margin:-0.25em 100px 0.5rem}"
+
+  test "spaced number and keyword stay separate":
+    check compile(".a\n  margin: 1px auto") ==
+      ".a{margin:1px auto}"
+
+  test "resolution suffix compiles":
+    check compile(".a\n  background-image: image-set(\"a.png\" 1x, \"b.png\" 2x)") ==
+      ".a{background-image:image-set(\"a.png\" 1x, \"b.png\" 2x)}"
+
+  test "dynamic triplet with alpha stays verbatim":
+    check compile(":root\n  --t: 13, 110, 253\n.a\n  color: rgba(var(--t), 0.5)") ==
+      ":root{--t:13, 110, 253}.a{color:rgba(var(--t), 0.5)}"
+
+  test "dynamic triplet alone stays verbatim":
+    check compile(":root\n  --t: 13, 110, 253\n.a\n  border-color: rgb(var(--t))") ==
+      ":root{--t:13, 110, 253}.a{border-color:rgb(var(--t))}"
+
+  test "dynamic alpha in 4-arg form stays verbatim":
+    check compile(".a\n  outline-color: rgba(13, 110, 253, var(--a))") ==
+      ".a{outline-color:rgba(13, 110, 253, var(--a))}"
+
+  test "dynamic channel in 3-arg form stays verbatim":
+    check compile(".a\n  background: rgb(var(--r), 0, 0)") ==
+      ".a{background:rgb(var(--r), 0, 0)}"
+
+  test "static 2-arg color call still errors":
+    expect CatchableError:
+      discard compile(".a\n  color: rgba(red, 0.5)")
+
+  test "many-stop gradient compiles":
+    check compile(".a\n  background-image: linear-gradient(45deg, rgba(255, 255, 255, 0.15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 75%, transparent 75%, transparent)") ==
+      ".a{background-image:linear-gradient(45deg, rgba(255, 255, 255, 0.15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 75%, transparent 75%, transparent)}"
+
+proc compileLenient(code: string): tuple[css: string, warned: seq[string]] =
+  ## compile() with the default `bro c` semantics: no static CSS type
+  ## system, VM/JIT types only, silent on unknown custom properties.
+  var program: Ast
+  parser.parseScript(program, code, "test.bass")
+  codegen.strictCss = false
+  codegen.resetCustomProps()
+  let prevHandler = codegen.warnHandler
+  var warned: seq[string] = @[]
+  codegen.warnHandler = proc(msg: string) {.gcsafe.} =
+    {.cast(gcsafe).}:
+      warned.add(msg)
+  try:
+    let mainChunk = newChunk("test.bass")
+    var script = newScript(mainChunk)
+    var module = newModule("test", some("test.bass"))
+    loadFullStdlib(script, module)
+    script.stdpos = script.procs.high
+    var gen = initCodeGen(script, module, mainChunk)
+    gen.genScript(program, none(string))
+    let virtualMachine = newVirtualMachine(VMPreferences())
+    result = (virtualMachine.interpret(script, mainChunk).stringVal[], warned)
+  finally:
+    codegen.warnHandler = prevHandler
+
+suite "lenient mode (default bro c, no --strict)":
+  test "$var type mismatch compiles":
+    let (css, warned) = compileLenient("var $c = red\n.a\n  width: $c")
+    check css == ".a{width:#ff0000}"
+    check warned.len == 0
+
+  test "var() declared-type mismatch compiles":
+    let (css, warned) = compileLenient(":root\n  --s: 1rem\n.a\n  color: var(--s)")
+    check css == ":root{--s:1rem}.a{color:var(--s)}"
+    check warned.len == 0
+
+  test "invalid color compiles":
+    let (css, warned) = compileLenient(".a\n  color: #zzzzzz")
+    check css == ".a{color:#zzzzzz}"
+    check warned.len == 0
+
+  test "unknown var is silent":
+    let (css, warned) = compileLenient(".a\n  color: var(--nope)")
+    check css == ".a{color:var(--nope)}"
+    check warned.len == 0
+
+  test "output parity with strict mode":
+    check compileLenient(":root\n  --brand: red\n.c\n  color: var(--brand)")[0] ==
+      compile(":root\n  --brand: red\n.c\n  color: var(--brand)")
+
+  test "VM types still enforced":
+    expect CatchableError:
+      discard compileLenient(".a\n  color: lighten(1px, 10)")[0]
+
+  test "bootstrap triplet pattern compiles":
+    let (css, warned) = compileLenient(".a\n  color: rgba(var(--t), var(--a, 1))")
+    check css == ".a{color:rgba(var(--t), var(--a, 1))}"
+    check warned.len == 0

@@ -14,6 +14,7 @@ proc compileExpectSuccess(code: string): string =
   ## Script reused across mainChunk swaps cannot resolve cross-module calls.
   var program: Ast
   parser.parseScript(program, code, "test.bass")
+  codegen.strictCss = true # suite default mirrors `bro c --strict`
   let mainChunk = newChunk("test.bass")
   var script = newScript(mainChunk)
   var module = newModule("test", some("test.bass"))

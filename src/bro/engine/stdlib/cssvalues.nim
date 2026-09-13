@@ -36,17 +36,43 @@ type
   BroColor* = object
     c*: Color
     raw*: string
+  CssVar* = object
+    name*: string
+    fallback*: string
+  CssFunction* = object
+    ## Payload for CSS function values (translate3d, blur, gradients, ...).
+    ## The full canonical spelling lives on the foreign tag (used by
+    ## valueToCssText); the payload keeps the function name for
+    ## introspection. One payload type serves all function families; the
+    ## family is carried by the value's TypeKind (ttyTransform, ttyFilter,
+    ## ttyImage, ttyShape, ttyEasing, ttyColor).
+    fname*: string
 
 proc cssNumStr*(f: float): string =
   result = $f
   if result.endsWith(".0"):
     result.setLen(result.len - 2)
 
+var cssPayloadFreed* = 0
+  ## TEMP DEBUG (remove before commit): destructor invocation count.
+var cssPayloadMade* = 0
+  ## TEMP DEBUG (remove before commit): construction count.
+
+proc destroyCssPayload[T](data: pointer) {.nimcall.} =
+  ## Per-payload destructor: `reset` runs the string field destructors
+  ## before the struct memory goes back. A bare `dealloc` would orphan
+  ## every string owned by the payload (raw memory has no destructors),
+  ## leaking them once per constructed value.
+  inc cssPayloadFreed
+  reset(cast[ptr T](data)[])
+  dealloc(data)
+
 proc initCssPayload*[T: object](id: TypeId, payload: T, display: string): Value =
+  inc cssPayloadMade
   let mem = alloc(sizeof(T))
   zeroMem(mem, sizeof(T))
   cast[ptr T](mem)[] = payload
   result = Value(typeId: id)
   result.objectVal = Object(isForeign: true,
     foreign: ForeignData(data: mem, tag: display,
-      destructor: proc (data: pointer) {.nimcall.} = dealloc(data)))
+      destructor: destroyCssPayload[T]))

@@ -1,5 +1,5 @@
 import unittest
-import std/[strutils, options]
+import std/[strutils, options, os, memfiles]
 import pkg/openparser/json
 
 import ../src/bro/engine/vancodegen
@@ -54,6 +54,27 @@ suite "lexer tests":
     assert tokens[3].kind == tkInt
     assert tokens[3].value == "10"
 
+  test "tokenize from memfile matches string backend":
+    let path = currentSourcePath().parentDir / "stylesheets" / "import_main.bass"
+    var mf = memfiles.open(path, fmRead)
+    defer: mf.close()
+    var mlex = newLexer(mf.mem, mf.size)
+    var slex = newLexer(readFile(path))
+    while true:
+      let a = mlex.getToken()
+      let b = slex.getToken()
+      assert a.kind == b.kind
+      assert a.value == b.value
+      assert a.line == b.line
+      assert a.col == b.col
+      assert a.pos == b.pos
+      if a.kind == tkEOF: break
+
+  test "lexeme retrieves raw source slice":
+    var lex = newLexer(".a { color: red; }")
+    assert lex.lexeme(0, 2) == ".a "
+    assert lex.lexeme(5, 9) == "color"
+
   test "tokenize if elif else":
     var lex = newLexer("if x elif y else")
     var tokens: seq[TokenTuple]
@@ -91,18 +112,52 @@ suite "lexer tests":
     while tok.kind != tkEOF:
       tokens.add(tok)
       tok = lex.getToken()
-    assert tokens.len == 6
-    assert tokens[0].kind == tkInt
-    assert tokens[0].value == "16"
-    assert tokens[1].kind == tkIdentifier
-    assert tokens[1].value == "px"
-    assert tokens[2].kind == tkFloat
-    assert tokens[2].value == "2.5"
-    assert tokens[3].kind == tkIdentifier
-    assert tokens[3].value == "em"
-    assert tokens[4].kind == tkInt
-    assert tokens[4].value == "100"
-    assert tokens[5].kind == tkPercent
+    assert tokens.len == 4
+    assert tokens[0].kind == tkUnit
+    assert tokens[0].value == "16px"
+    assert tokens[1].kind == tkUnit
+    assert tokens[1].value == "2.5em"
+    assert tokens[2].kind == tkInt
+    assert tokens[2].value == "100"
+    assert tokens[3].kind == tkPercent
+
+  test "tokenize unit edge cases":
+    var lex = newLexer("1x 24deg -5px .5rem 1em 1e2px 10-2 5%3")
+    var tokens: seq[TokenTuple]
+    var tok = lex.getToken()
+    while tok.kind != tkEOF:
+      tokens.add(tok)
+      tok = lex.getToken()
+    assert tokens[0].kind == tkUnit
+    assert tokens[0].value == "1x"
+    assert tokens[1].kind == tkUnit
+    assert tokens[1].value == "24deg"
+    assert tokens[2].kind == tkUnit
+    assert tokens[2].value == "-5px"
+    assert tokens[3].kind == tkUnit
+    assert tokens[3].value == "0.5rem"
+    assert tokens[4].kind == tkUnit
+    assert tokens[4].value == "1em"
+    assert tokens[5].kind == tkUnit
+    assert tokens[5].value == "1e2px"
+    assert tokens[6].kind == tkInt
+    assert tokens[6].value == "10"
+    assert tokens[7].kind == tkInt
+    assert tokens[7].value == "-2"
+    assert tokens[8].kind == tkInt
+    assert tokens[8].value == "5"
+    assert tokens[9].kind == tkPercent
+    assert tokens[10].kind == tkInt
+    assert tokens[10].value == "3"
+
+  test "tokenize hex with leading digit":
+    var lex = newLexer("#0d6efd")
+    var tok = lex.getToken()
+    assert tok.kind == tkHash
+    tok = lex.getToken()
+    assert tok.kind == tkUnit
+    assert tok.value == "0d6efd"
+    assert tok.wsno == 0
 
   test "tokenize operators":
     var lex = newLexer("+ - * / == != < > <= >= && || and or is isnot")
@@ -163,10 +218,13 @@ suite "lexer tests":
       tokens.add(tok)
       tok = lex.getToken()
     assert tokens[0].kind == tkKeywordTrue
-    assert tokens[0].value == "true"
+    assert tokens[0].value == ""
     assert tokens[1].kind == tkKeywordFalse
+    assert tokens[1].value == ""
     assert tokens[2].kind == tkKeywordNull
+    assert tokens[2].value == ""
     assert tokens[3].kind == tkKeywordUndefined
+    assert tokens[3].value == ""
 
   test "tokenize keywords":
     var lex = newLexer("var const function return while break continue import iterator")
@@ -176,9 +234,13 @@ suite "lexer tests":
       tokens.add(tok)
       tok = lex.getToken()
     assert tokens[0].kind == tkKeywordVar
+    assert tokens[0].value == ""
     assert tokens[1].kind == tkKeywordConst
+    assert tokens[1].value == ""
     assert tokens[2].kind == tkKeywordFunction
+    assert tokens[2].value == ""
     assert tokens[3].kind == tkKeywordReturn
+    assert tokens[3].value == ""
     assert tokens[4].kind == tkKeywordWhile
     assert tokens[5].kind == tkKeywordBreak
     assert tokens[6].kind == tkKeywordContinue
@@ -266,6 +328,52 @@ suite "lexer tests":
     assert tokens[0].kind == tkBacktick
     assert tokens[0].value == "template string"
 
+  test "multiline block comment tracks lines":
+    var lex = newLexer("/* line1\nline2\r\nline3 */\n.foo {}")
+    var tokens: seq[TokenTuple]
+    var tok = lex.getToken()
+    while tok.kind != tkEOF:
+      tokens.add(tok)
+      tok = lex.getToken()
+    assert tokens[0].kind == tkComment
+    assert tokens[0].value == " line1\nline2\r\nline3 "
+    assert tokens[1].kind == tkDot
+    assert tokens[1].line == 4
+    assert tokens[1].col == 0
+
+  test "unterminated block comment runs to EOF":
+    var lex = newLexer(".a {} /* never ends")
+    var tokens: seq[TokenTuple]
+    var tok = lex.getToken()
+    while tok.kind != tkEOF:
+      tokens.add(tok)
+      tok = lex.getToken()
+    assert tokens[^1].kind == tkComment
+    assert tokens[^1].value == " never ends"
+
+  test "multiline plain string tracks lines":
+    var lex = newLexer("\"a\nb\"\n.foo {}")
+    var tokens: seq[TokenTuple]
+    var tok = lex.getToken()
+    while tok.kind != tkEOF:
+      tokens.add(tok)
+      tok = lex.getToken()
+    assert tokens[0].kind == tkString
+    assert tokens[0].value == "a\nb"
+    assert tokens[1].kind == tkDot
+    assert tokens[1].line == 3
+
+  test "comment with lone stars stays one token":
+    var lex = newLexer("/** a * b **/ .x {}")
+    var tokens: seq[TokenTuple]
+    var tok = lex.getToken()
+    while tok.kind != tkEOF:
+      tokens.add(tok)
+      tok = lex.getToken()
+    assert tokens[0].kind == tkDocBlock
+    assert tokens[0].value == "* a * b *"
+    assert tokens[1].kind == tkDot
+
   test "tokenize comma separated selectors":
     var lex = newLexer("h1, h2, h3 {")
     var tokens: seq[TokenTuple]
@@ -305,12 +413,11 @@ suite "lexer tests":
   test "tokenize wsno is zero for attached tokens":
     var lex = newLexer("16px")
     var tok = lex.getToken()
-    assert tok.kind == tkInt
-    assert tok.value == "16"
+    assert tok.kind == tkUnit
+    assert tok.value == "16px"
     assert tok.wsno == 0
     tok = lex.getToken()
-    assert tok.kind == tkIdentifier
-    assert tok.wsno == 0
+    assert tok.kind == tkEOF
 
   test "tokenize wsno is positive for spaced tokens":
     var lex = newLexer("16 px")
