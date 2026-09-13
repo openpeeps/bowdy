@@ -1,7 +1,7 @@
 import std/[options, strutils]
 import pkg/openparser/json
-import ../src/bro/engine/vancodegen
-import ../src/bro/engine/parser
+import ../src/bowdy/engine/vancodegen
+import ../src/bowdy/engine/parser
 import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value]
 
 proc tryParse(label, code: string) =

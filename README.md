@@ -1,23 +1,23 @@
 <p align="center">
-  <img src="https://github.com/openpeeps/bro/blob/main/.github/bro.png" alt="Bro" width="170px"><br>
-  Bro &bullet; A fast CSS Preprocessor<br>
+  <img src="https://github.com/openpeeps/bowdy/blob/main/.github/bowdy.png" alt="bowdy" width="170px"><br>
+  bowdy &bullet; A fast CSS Preprocessor<br>
   Typed &bullet; VM & JIT Compiler &bullet; Written in Nim language 
 </p>
 
 <p align="center">
-  <code>nimble install bro</code> / <code>clue install bro --build</code>
+  <code>nimble install bowdy</code> / <code>clue install bowdy --build</code>
 </p>
 
 <p align="center">
-  <a href="https://openpeeps.github.io/bro/theindex.html">API Reference</a> |
-  <a href="https://bro.openpeeps.dev/">Documentation</a> | 
-  <a href="https://github.com/openpeeps/bro/releases/latest">Download binaries</a><br>
-  <img src="https://github.com/openpeeps/bro/workflows/test/badge.svg" alt="Github Actions"> <img src="https://github.com/openpeeps/bro/workflows/docs/badge.svg" alt="Github Actions">
+  <a href="https://openpeeps.github.io/bowdy/theindex.html">API Reference</a> |
+  <a href="https://bowdy.openpeeps.dev/">Documentation</a> | 
+  <a href="https://github.com/openpeeps/bowdy/releases/latest">Download binaries</a><br>
+  <img src="https://github.com/openpeeps/bowdy/workflows/test/badge.svg" alt="Github Actions"> <img src="https://github.com/openpeeps/bowdy/workflows/docs/badge.svg" alt="Github Actions">
 </p>
 
 ## Overview
 
-Bro transpiles BASS files to standard CSS. It is written in Nim and designed for fast compilation, a typed system that catches errors early, and syntax that stays close to CSS while adding variables, nesting, mixins, control flow, and modules.
+bowdy transpiles BASS files to standard CSS. It is written in Nim and designed for fast compilation, a typed system that catches errors early, and syntax that stays close to CSS while adding variables, nesting, mixins, control flow, and modules.
 
 BASS files use the `.bass` extension and compile to `.css`.
 
@@ -41,26 +41,26 @@ BASS files use the `.bass` extension and compile to `.css`.
 Requires Nim >= 2.0.0 (https://nim-lang.org/install.html).
 
 ```sh
-nimble install bro
+nimble install bowdy
 ```
 
 Or use [clue](https://github.com/openpeeps/clue), an alternative package manager for Nim development:
 ```sh
-clue install bro --build
+clue install bowdy --build
 ```
 
 ### Compile
 
 ```sh
-bro c style.bass -o style.css        # compile to CSS (minified by default)
-bro c style.bass --pretty -o style.css  # pretty-printed output
-bro c style.bass --watch             # recompile on change
-bro -h                               # all options
+bowdy c style.bass -o style.css        # compile to CSS (minified by default)
+bowdy c style.bass --pretty -o style.css  # pretty-printed output
+bowdy c style.bass --watch             # recompile on change
+bowdy -h                               # all options
 ```
 
 Source maps are supported with `--sourceMap`.
 
-By default `bro c` is lenient: only VM types apply (variables, function
+By default `bowdy c` is lenient: only VM types apply (variables, function
 signatures, stdlib constructors), so a mistyped `width: $colorVar` still
 compiles. Pass `--strict` to enable the static CSS type system: property
 values are checked against their CSS syntax, invalid colors are hard
@@ -173,13 +173,13 @@ var $p = dbl(21)
 ```
 `func` is an alias for `fn`. Functions support overloading and forward declarations.
 
-### 7. Embed Bro in your Nim app
+### 7. Embed bowdy in your Nim app
 
-`import bro` gives two high-level calls that never quit the process.
+`import bowdy` gives two high-level calls that never quit the process.
 Both return a `BroCompileResult` (`ok`, `css`, `warnings`, `error`):
 
 ```nim
-import bro
+import bowdy
 
 let r = compileStylesheet("var $primary = #0d6efd\n.card\n  color: $primary")
 if r.ok:
@@ -194,14 +194,14 @@ let f = compileStylesheetFile("styles/main.bass", pretty = true)
 `compileStylesheet` compiles a source string (relative imports resolve
 against the working directory); `compileStylesheetFile` compiles a file
 on disk and resolves sibling imports next to it. Both take an optional
-`strict = false` parameter mirroring `bro c --strict`. Parse, type, and
+`strict = false` parameter mirroring `bowdy c --strict`. Parse, type, and
 codegen failures come back as `ok == false` with `error` set, so a host
 app stays in control.
 
 ## Benchmarks
 
 `benchmarks/bench.sh` times four CLI commands head-to-head with hyperfine:
-`sassc`, `bro c`, `bro c --strict`, and dart-sass when the vendored
+`sassc`, `bowdy c`, `bowdy c --strict`, and dart-sass when the vendored
 `benchmarks/dart-sass/sass` binary (gitignored) is present:
 
 ```sh
@@ -243,16 +243,16 @@ compactly (`translate3d(0.25em,0,0)`).
 
 ## Documentation
 
-- [API Reference](https://openpeeps.github.io/bro/theindex.html)
-- [Official Documentation](https://bro.openpeeps.dev/)
+- [API Reference](https://openpeeps.github.io/bowdy/theindex.html)
+- [Official Documentation](https://bowdy.openpeeps.dev/)
 
 ## Contributing
 
-- Report a bug: [Create an issue](https://github.com/openpeeps/bro/issues)
-- Contribute code: [Fork the repository](https://github.com/openpeeps/bro/fork)
+- Report a bug: [Create an issue](https://github.com/openpeeps/bowdy/issues)
+- Contribute code: [Fork the repository](https://github.com/openpeeps/bowdy/fork)
 - Questions or feedback: open an issue or discussion.
 
 ## License
 
-Bro is released under the `LGPL-3.0-or-later` license. Made by Humans from OpenPeeps.<br>
+bowdy is released under the `LGPL-3.0-or-later` license. Made by Humans from OpenPeeps.<br>
 Copyright &copy; 2026 OpenPeeps & Contributors — All rights reserved.

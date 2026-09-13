@@ -2,19 +2,19 @@ import unittest
 import std/[options, strutils, os]
 import pkg/openparser/json
 
-import ../src/bro/engine/vancodegen
-import ../src/bro/engine/parser
+import ../src/bowdy/engine/vancodegen
+import ../src/bowdy/engine/parser
 
 import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value]
 
-import ../src/bro/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
+import ../src/bowdy/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
 
 proc compileExpectSuccess(code: string): string =
   ## Fresh script + full stdlib per test (mirrors production). A cached
   ## Script reused across mainChunk swaps cannot resolve cross-module calls.
   var program: Ast
   parser.parseScript(program, code, "test.bass")
-  codegen.strictCss = true # suite default mirrors `bro c --strict`
+  codegen.strictCss = true # suite default mirrors `bowdy c --strict`
   let mainChunk = newChunk("test.bass")
   var script = newScript(mainChunk)
   var module = newModule("test", some("test.bass"))
@@ -274,7 +274,7 @@ suite "CSS type system — valid values":
     check css == ".a{filter:none}"
 
 suite "CSS type system — invalid values":
-  # Invalid CSS values are hard errors (bro error), not [warn].
+  # Invalid CSS values are hard errors (bowdy error), not [warn].
   test "color: integer":
     let err = compileExpectError(".a { color: 123; }")
     check err.len > 0

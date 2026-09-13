@@ -1,6 +1,6 @@
-# Bro JIT pioneer test: foreign fast-path round trip.
+# bowdy JIT pioneer test: foreign fast-path round trip.
 #
-# Proves a host (bro) can extend vancode's DynASM JIT without forking it:
+# Proves a host (bowdy) can extend vancode's DynASM JIT without forking it:
 # a foreign proc registered via `registerJitForeignFast` is invoked through
 # the registered bridge (not the generic `jitCallProcBridgeFlat` boxing),
 # and `Value` payloads cross the native stack as GC-rooted ring indices.
@@ -56,7 +56,7 @@ proc newEnv(file: string): tuple[script: Script, vm: Vm] =
   bridge.setJitVm(vm)
   (script, vm)
 
-suite "bro jit: foreign fast paths":
+suite "bowdy jit: foreign fast paths":
   test "registered int fast path bypasses the generic bridge":
     let (script, vm) = newEnv("jit_pioneer")
     let callee = Proc(name: "pioneerAdd", kind: pkForeign,

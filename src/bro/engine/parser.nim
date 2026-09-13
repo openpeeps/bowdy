@@ -2,7 +2,7 @@
 #
 # (c) 2026 George Lemon | LGPL-v3 License
 #          Made by Humans from OpenPeeps
-#          https://github.com/openpeeps/bro
+#          https://github.com/openpeeps/bowdy
 
 import std/[strutils, tables, sets, macros, options, memfiles, os]
 import pkg/vancode/interpreter/[errors, ast]
@@ -530,7 +530,7 @@ const broValueFnNames* = ["lighten", "darken", "saturate", "desaturate", "spin",
   "cubic-bezier", "steps", "linear",
   "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch",
   "color", "light-dark", "color-mix", "image", "image-set"]
-  ## Bro stdlib procs that construct or combine strictly typed CSS values
+  ## bowdy stdlib procs that construct or combine strictly typed CSS values
   ## (see stdlib/libcolors, stdlib/libcss). Calls to these names in property
   ## value position parse as real calls so they evaluate to typed values;
   ## every other `name(...)` stays opaque raw CSS text (rgb, calc, url, ...).
@@ -542,7 +542,7 @@ const cssFnBareKeywords* = ["linear-gradient", "repeating-linear-gradient",
   "path", "xywh", "ray", "steps", "rgb", "rgba", "hsl", "hsla", "hwb",
   "lab", "lch", "oklab", "oklch", "color"]
   ## CSS functions whose bare-identifier arguments are keywords, never
-  ## variable reads (bro vars require `$`). Their args stringify at parse
+  ## variable reads (bowdy vars require `$`). Their args stringify at parse
   ## time so codegen never evaluates them as lookups (`to right` in
   ## gradients would otherwise die with `undeclared identifier 'to'`).
 
@@ -558,7 +558,7 @@ const cssFnNames* = ["translate3d", "translate", "translateX",
   "cubic-bezier", "steps", "linear",
   "rgb", "rgba", "hsl", "hsla", "hwb", "lab", "lch", "oklab", "oklch",
   "color", "light-dark", "color-mix", "image", "image-set"]
-  ## CSS functions registered as real bro procs (see libcss.initCssTypes).
+  ## CSS functions registered as real bowdy procs (see libcss.initCssTypes).
   ## Extend per wave; keep in sync with the registrations.
 
 const cssFnSlashAlpha* = ["rgb", "rgba", "hsl", "hsla", "hwb", "lab",
@@ -618,7 +618,7 @@ proc stringifyBareIdents(call: Node) =
 
 proc valIsDynamic(n: Node): bool =
   ## True when a value part needs runtime evaluation: a `$var` reference,
-  ## a bro value-function call, or a compound holding one. Opaque raw CSS
+  ## a bowdy value-function call, or a compound holding one. Opaque raw CSS
   ## calls (linear-gradient, ...) are single idents and stay verbatim.
   if n == nil: return false
   case n.kind
@@ -672,7 +672,7 @@ proc parseColorMixCall(p: var Parser, minPrec = 0): Node =
   if p.curr.kind == tkRParen: walk p # )
 
 proc parseVarCall(p: var Parser, minPrec = 0): Node =
-  ## Parse CSS `var(--name[, fallback])` as a real bro call returning
+  ## Parse CSS `var(--name[, fallback])` as a real bowdy call returning
   ## ttyCssVar, so custom-property names stay atomic and use sites
   ## type-check structurally. Assumes `p.curr` is tkKeywordVar.
   result = ast.newCall(ast.newIdent("var"))
@@ -683,16 +683,16 @@ proc parseVarCall(p: var Parser, minPrec = 0): Node =
   if result.len < 2:
     p.error("var() expects a custom property name", fatal = true)
   # Bare identifiers inside var() are CSS keywords (none, auto, solid):
-  # bro variables always require `$`, so a `$`-less ident can never be a
+  # bowdy variables always require `$`, so a `$`-less ident can never be a
   # variable read. Without this, codegen evaluates them as lookups and
   # dies with `undeclared identifier 'none'` on real-world CSS like
   # `var(--bs-form-select-bg-icon, none)`. Strings render raw through
   # valueToCssText, so the cached `var(--x, none)` spelling stays exact.
-  # Opaque static calls (translate3d(...)) stringify the same way; bro
+  # Opaque static calls (translate3d(...)) stringify the same way; bowdy
   # calls and dynamic subtrees keep evaluating.
   stringifyBareIdents(result)
   for i in 1 ..< result.len:
-    # Opaque calls stringify as before; fully-static bro calls (no vars,
+    # Opaque calls stringify as before; fully-static bowdy calls (no vars,
     # no nested calls) stringify too, compactly instead of evaluating —
     # unless the static text needs quoting (bare keywords stringified
     # above are indistinguishable from user-quoted strings there, so
@@ -705,7 +705,7 @@ proc parseVarCall(p: var Parser, minPrec = 0): Node =
         lit.col = result[i].col
         result[i] = lit
       else:
-        # A bro call with fully-static args (no vars, no nested calls)
+        # A bowdy call with fully-static args (no vars, no nested calls)
         # stringifies too; anything dynamic keeps evaluating.
         var argsStatic = true
         for j in 1 ..< result[i].len:
@@ -1260,7 +1260,7 @@ proc parseValueList(p: var Parser): Node =
     # CSS function calls (rgb, calc, linear-gradient, url, etc.)
     # are collected as opaque raw text to preserve internal spacing
     # verbatim for modern CSS syntax like `rgb(13 110 253 / 50%)`.
-    # Calls to known bro value functions (lighten, mix, parseLength, var,
+    # Calls to known bowdy value functions (lighten, mix, parseLength, var,
     # ...) parse as real calls so they evaluate to strictly typed values.
     elif p.curr.kind == tkIdentifier and
         p.next.kind == tkLParen and p.next.line == p.curr.line and p.next.wsno == 0:

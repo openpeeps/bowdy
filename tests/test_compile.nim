@@ -1,14 +1,14 @@
-import ../src/bro/engine/vancodegen
+import ../src/bowdy/engine/vancodegen
 import unittest
 import std/[options, strutils, tables, os]
 import pkg/openparser/json
 
-import ../src/bro/engine/parser
+import ../src/bowdy/engine/parser
 
 import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value]
 import pkg/vancode/interpreter/resolver
 
-import ../src/bro/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
+import ../src/bowdy/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
 
 proc loadFullStdlib(script: Script, module: Module) =
   ## Mirror the production CLI: system + colors + arrays + cssTypes.
@@ -22,7 +22,7 @@ proc loadFullStdlib(script: Script, module: Module) =
 proc compile(code: string): string =
   var program: Ast
   parser.parseScript(program, code, "test.bass")
-  codegen.strictCss = true # suite default mirrors `bro c --strict`
+  codegen.strictCss = true # suite default mirrors `bowdy c --strict`
   codegen.resetCustomProps()
   codegen.collectCustomProps(program)
 
@@ -48,7 +48,7 @@ proc compileFile(path: string): string =
 
   var program: Ast
   parser.parseScriptFile(program, path)
-  codegen.strictCss = true # suite default mirrors `bro c --strict`
+  codegen.strictCss = true # suite default mirrors `bowdy c --strict`
   codegen.resetCustomProps()
   codegen.collectCustomProps(program)
   let mainChunk = newChunk(path)
@@ -970,7 +970,7 @@ suite "Phase 5: mixins":
     check compile("var $primary = #0d6efd\nmixin btn(color: color) =\n  color: $color\n.a\n  @btn($primary)") ==
       ".a{color:#0d6efd}"
 
-  test "mixin bro-call with named color arg":
+  test "mixin bowdy-call with named color arg":
     check compile("mixin m(c: color) =\n  color: darken($c, 10)\n.a\n  @m(red)") ==
       ".a{color:#cc0000}"
 
@@ -1138,7 +1138,7 @@ proc compilePretty(code: string): string =
   ## compile() with --pretty semantics: VM emits newlines + indentation.
   var program: Ast
   parser.parseScript(program, code, "test.bass")
-  codegen.strictCss = true # suite default mirrors `bro c --strict`
+  codegen.strictCss = true # suite default mirrors `bowdy c --strict`
   codegen.resetCustomProps()
   codegen.collectCustomProps(program)
   let mainChunk = newChunk("test.bass")
@@ -1188,7 +1188,7 @@ suite "Phase 6: pretty output":
 
 suite "Phase 6: doc-block preservation":
   test "bang banner preserved before rule (minified)":
-    check compile("/*! bro v1 */\n.a { color: red }") == "/*! bro v1 */\n.a{color:#ff0000}"
+    check compile("/*! bowdy v1 */\n.a { color: red }") == "/*! bowdy v1 */\n.a{color:#ff0000}"
 
   test "double-star docblock preserved with original flavor":
     check compile("/** section note */\n.b { color: blue }") == "/** section note */\n.b{color:#0000ff}"
@@ -1264,11 +1264,11 @@ suite "Phase 6: typed var() references":
     expect CatchableError:
       discard compile(":root\n  --a: 1px\n  --b: var(--a)\n.c\n  color: var(--b)")
 
-  test "bro var alias resolves":
+  test "bowdy var alias resolves":
     check compile("var $c = red\n:root\n  --a: $c\n.b\n  color: var(--a)") ==
       ":root{--a:#ff0000}.b{color:var(--a)}"
 
-  test "bro call declaration infers color":
+  test "bowdy call declaration infers color":
     check compile(":root\n  --d: darken(red, 10)\n.c\n  color: var(--d)") ==
       ":root{--d:#cc0000}.c{color:var(--d)}"
 
@@ -1378,7 +1378,7 @@ suite "Phase 6: typed var() references":
       ".a{background-image:linear-gradient(45deg, rgba(255, 255, 255, 0.15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, 0.15) 50%, rgba(255, 255, 255, 0.15) 75%, transparent 75%, transparent)}"
 
 proc compileLenient(code: string): tuple[css: string, warned: seq[string]] =
-  ## compile() with the default `bro c` semantics: no static CSS type
+  ## compile() with the default `bowdy c` semantics: no static CSS type
   ## system, VM/JIT types only, silent on unknown custom properties.
   var program: Ast
   parser.parseScript(program, code, "test.bass")
@@ -1402,7 +1402,7 @@ proc compileLenient(code: string): tuple[css: string, warned: seq[string]] =
   finally:
     codegen.warnHandler = prevHandler
 
-suite "lenient mode (default bro c, no --strict)":
+suite "lenient mode (default bowdy c, no --strict)":
   test "$var type mismatch compiles":
     let (css, warned) = compileLenient("var $c = red\n.a\n  width: $c")
     check css == ".a{width:#ff0000}"

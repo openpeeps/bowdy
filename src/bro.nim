@@ -3,13 +3,13 @@
 # (c) 2026 George Lemon | LGPL-v3 License
 #          Made by Humans from OpenPeeps
 #          https://github.com/openpeeps/tim
-import ./bro/engine/vancodegen
+import ./bowdy/engine/vancodegen
 
 when isMainModule:
-  # Building Bro as a CLI application
+  # Building bowdy as a CLI application
   import pkg/kapsis
   import pkg/kapsis/[runtime, cli]
-  import ./bro/app/build
+  import ./bowdy/app/build
 
   initKapsis do:
     defaultCommand: "c"
@@ -20,18 +20,18 @@ when isMainModule:
       ast path(bass), ?filename("-o"):
         ## Generate binary AST from BASS/CSS
 else:
-  # High-level API for embedding Bro in your Nim app:
+  # High-level API for embedding bowdy in your Nim app:
   #
-  #   import bro
+  #   import bowdy
   #   let r = compileBroString(".a\n  color: red")
   #   if r.ok: echo r.css
   #   else: echo "build failed: " & r.error
   import std/[options, os, tables]
   import pkg/openparser/json
   import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value, resolver]
-  import ./bro/engine/parser
-  import ./bro/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
-  import ./bro/engine/jitbridge
+  import ./bowdy/engine/parser
+  import ./bowdy/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
+  import ./bowdy/engine/jitbridge
   # Same ordering rule as app/build: after the engine imports so voodoo
   # registrations precede the JIT compilers' compilation.
   from pkg/vancode/interpreter/jit/jit import installJit

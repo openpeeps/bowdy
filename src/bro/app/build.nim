@@ -2,7 +2,7 @@
 #
 # (c) 2026 George Lemon | LGPL-v3 License
 #          Made by Humans from OpenPeeps
-#          https://github.com/openpeeps/bro
+#          https://github.com/openpeeps/bowdy
 
 import std/[os, monotimes, times, options, strutils, algorithm]
 
@@ -203,7 +203,7 @@ proc cCommand*(v: Values) =
     quit(1)
 
   # init module manager with persistent cache and pkg resolver
-  let cacheRoot = getHomeDir() / ".bro" / "cache"
+  let cacheRoot = getHomeDir() / ".bowdy" / "cache"
   let manager = newModuleManager(cacheRoot = some(cacheRoot))
   # pkg resolver for `pkg/` imports (Tim packages sharing ~/.tim)
   manager.pkgResolver = some(proc(pkgImport: string): Option[string] {.closure.} =

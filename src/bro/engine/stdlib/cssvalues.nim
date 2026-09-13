@@ -1,6 +1,6 @@
 # Shared payload types + safe foreign-value constructor for strict CSS values.
 #
-# Every CSS value is a vancode Value whose typeId is the bro TypeKind ord and
+# Every CSS value is a vancode Value whose typeId is the bowdy TypeKind ord and
 # whose objectVal is a foreign Object wrapping one of the payloads below.
 #
 # Payloads MUST be plain objects (never ref): vancode initValue copies objects
@@ -9,7 +9,7 @@
 # Construction goes through initCssPayload (not vancode initValue directly):
 # raw alloc memory is zeroed first so ARC never decrefs recycled garbage when
 # assigning payloads that own strings. The canonical CSS spelling is cached
-# on the foreign tag so the VM can emit typed values without bro imports.
+# on the foreign tag so the VM can emit typed values without bowdy imports.
 #
 # (c) 2026 George Lemon | LGPL-v3 License
 

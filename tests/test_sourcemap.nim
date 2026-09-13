@@ -1,14 +1,14 @@
 import unittest
 import std/[options, strutils, tables]
 
-import ../src/bro/engine/vancodegen
-import ../src/bro/engine/parser
-import ../src/bro/engine/sourcemap
+import ../src/bowdy/engine/vancodegen
+import ../src/bowdy/engine/parser
+import ../src/bowdy/engine/sourcemap
 
 import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value]
 import pkg/openparser/json
 
-import ../src/bro/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
+import ../src/bowdy/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
 
 proc decodeVlq(mappings: string): seq[seq[tuple[genCol, src, line, col: int]]] =
   ## Minimal base64-VLQ decoder for verifying test output.

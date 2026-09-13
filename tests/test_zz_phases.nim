@@ -1,13 +1,13 @@
-import bro/engine/vancodegen
+import bowdy/engine/vancodegen
 import std/[options, os, tables]
 import pkg/openparser/json
 import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value,
   resolver]
 import pkg/vancode/interpreter/jit/jit
 import pkg/vancode/interpreter/jit/compiler_bridge
-import bro/engine/parser
-import bro/engine/stdlib/[libsystem, libarrays, libcolors, libcss, cssvalues]
-import bro/engine/jitbridge
+import bowdy/engine/parser
+import bowdy/engine/stdlib/[libsystem, libarrays, libcolors, libcss, cssvalues]
+import bowdy/engine/jitbridge
 import unittest
 
 const sampleFull = """:root

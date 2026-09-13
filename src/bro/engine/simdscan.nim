@@ -1,4 +1,4 @@
-# Bound-safe span scanners for the bro lexer (SIMD fast paths + scalar fallback).
+# Bound-safe span scanners for the bowdy lexer (SIMD fast paths + scalar fallback).
 #
 # Contract every proc honors: inputs satisfy 0 <= pos <= stop <= readableLen,
 # and no proc ever reads at or past `stop`. That keeps mmap/memfiles tails

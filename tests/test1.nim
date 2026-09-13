@@ -2,9 +2,9 @@ import unittest
 import std/[strutils, options, os, memfiles]
 import pkg/openparser/json
 
-import ../src/bro/engine/vancodegen
-import ../src/bro/engine/lexer
-import ../src/bro/engine/parser
+import ../src/bowdy/engine/vancodegen
+import ../src/bowdy/engine/lexer
+import ../src/bowdy/engine/parser
 
 import pkg/vancode/interpreter/ast
 

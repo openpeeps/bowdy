@@ -1,4 +1,4 @@
-import bro
+import bowdy
 import unittest
 
 const sample = """:root

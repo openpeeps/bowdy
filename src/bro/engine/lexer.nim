@@ -2,7 +2,7 @@
 #
 # (c) 2026 George Lemon | LGPL-v3 License
 #          Made by Humans from OpenPeeps
-#          https://github.com/openpeeps/bro
+#          https://github.com/openpeeps/bowdy
 
 import std/strutils
 from pkg/openparser/private/lexutils import getContext

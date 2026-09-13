@@ -2,7 +2,7 @@
 #
 # (c) 2026 George Lemon | LGPL-v3 License
 #          Made by Humans from OpenPeeps
-#          https://github.com/openpeeps/bro
+#          https://github.com/openpeeps/bowdy
 
 import std/[options, strutils]
 import pkg/openparser/colors
@@ -51,7 +51,7 @@ proc canonicalColorRaw*(col: Color, raw: string): string =
 proc newBroColor*(col: Color, raw: string = ""): Value =
   let r = canonicalColorRaw(col, raw)
   # Display spelling cached on the foreign tag so the VM can emit colors
-  # without bro imports (vancode scope only sees Value/ForeignData).
+  # without bowdy imports (vancode scope only sees Value/ForeignData).
   result = initCssPayload(tyColor, BroColor(c: col, raw: r), r)
 
 proc resolveColor*(v: Value): Color =

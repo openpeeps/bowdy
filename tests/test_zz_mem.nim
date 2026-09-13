@@ -1,4 +1,4 @@
-import bro
+import bowdy
 import unittest
 import std/[os, strutils]
 

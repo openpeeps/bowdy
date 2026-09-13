@@ -2,7 +2,7 @@
 #
 # (c) 2026 George Lemon | LGPL License
 #          Made by Humans from OpenPeeps
-#          https://github.com/openpeeps/bro
+#          https://github.com/openpeeps/bowdy
 #
 # Source map generation for the BASS -> CSS pipeline.
 # Produces a v3 source map (https://sourcemaps.info/spec.html).

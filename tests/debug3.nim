@@ -1,4 +1,4 @@
-import ../src/bro/engine/parser
+import ../src/bowdy/engine/parser
 import pkg/openparser/css
 
 let css1 = parseCss("*{color:red}")

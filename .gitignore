@@ -6,7 +6,11 @@ testresults/
 /tests/*
 !/tests/*.nim
 !/tests/*.nims
+!/tests/stylesheets
 /bin
 /bench
 /cli.md
 /.cache
+benchmarks/vs_sassc/big.bass
+benchmarks/vs_sassc/big.scss
+benchmarks/dart-sass/

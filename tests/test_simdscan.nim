@@ -1,6 +1,6 @@
 import unittest
 import std/strutils
-import ../src/bro/engine/simdscan
+import ../src/bowdy/engine/simdscan
 
 proc buf(s: string): ptr UncheckedArray[char] =
   if s.len == 0: cast[ptr UncheckedArray[char]](unsafeAddr s)

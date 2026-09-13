@@ -1,4 +1,4 @@
-# CSS strict typed values for Bro — length, angle, time, resolution, flex
+# CSS strict typed values for bowdy — length, angle, time, resolution, flex
 #
 # Every CSS unit is a typed foreign Object (Value with isForeign objectVal)
 # wrapping a plain-object payload from cssvalues (never ref). No

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Head-to-head: sassc vs bro vs bro --strict vs dart-sass, all via CLI.
+# Head-to-head: sassc vs bowdy vs bowdy --strict vs dart-sass, all via CLI.
 #
 #   benchmarks/bench.sh                     # all three suites
 #   benchmarks/bench.sh --warmup=2 --runs=5
@@ -32,8 +32,8 @@ done
 for cmd in sassc hyperfine python3; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "missing: $cmd" >&2; exit 1; }
 done
-if [ ! -x bin/bro ]; then
-  echo "building bro (release)..."
+if [ ! -x bin/bowdy ]; then
+  echo "building bowdy (release)..."
   clue build --release
 fi
 
@@ -45,8 +45,8 @@ suite() {
   local report="$1" tag="$2" scss="$3" bass="$4"
   local cmd=(hyperfine --warmup "$WARMUP" --runs "$RUNS" --export-markdown "$report")
   cmd+=(--command-name "sassc" "sassc -t compressed $scss /tmp/bench-$tag-sassc.css")
-  cmd+=(--command-name "bro" "./bin/bro c $bass -o:/tmp/bench-$tag-bro.css")
-  cmd+=(--command-name "bro --strict" "./bin/bro c --strict $bass -o:/tmp/bench-$tag-strict.css")
+  cmd+=(--command-name "bowdy" "./bin/bowdy c $bass -o:/tmp/bench-$tag-bowdy.css")
+  cmd+=(--command-name "bowdy --strict" "./bin/bowdy c --strict $bass -o:/tmp/bench-$tag-strict.css")
   if [ "$HAS_DART" = 1 ]; then
     cmd+=(--command-name "dart-sass" "$DARTSASS --style=compressed $scss /tmp/bench-$tag-dart.css 2>/dev/null")
   fi

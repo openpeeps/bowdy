@@ -2,7 +2,7 @@
 #
 # (c) 2026 George Lemon | LGPL-v3 License
 #          Made by Humans from OpenPeeps
-#          https://github.com/openpeeps/bro
+#          https://github.com/openpeeps/bowdy
 
 import std/os
 import pkg/voodoo/extensibles
@@ -54,7 +54,7 @@ block extendCodeGen:
     type CustomPropEntry = object
       ## Registered type info for a `--x` custom property declaration.
       ## Concrete kinds enable use-site checking of `var(--x)`; aliases
-      ## resolve lazily (bro `$var` via scope lookup, chained `var(--y)`
+      ## resolve lazily (bowdy `$var` via scope lookup, chained `var(--y)`
       ## recursively); unjudgeable shapes stay silent-but-declared.
       case hasKind: bool
       of true:
@@ -364,9 +364,9 @@ block extendCodeGen:
       else: "keyword"
 
     proc isBroCall(node: Node): bool {.codegen.} =
-      ## True when node calls a known bro foreign proc (lighten, mix,
+      ## True when node calls a known bowdy foreign proc (lighten, mix,
       ## parseLength, parseColor, var, ...) rather than a raw CSS function
-      ## (linear-gradient, rgb, calc). Bro calls evaluate to strictly
+      ## (linear-gradient, rgb, calc). bowdy calls evaluate to strictly
       ## typed runtime values; raw CSS calls stay verbatim text.
       if node.kind != nkCall or node.len == 0 or node[0].kind != nkIdent:
         return false
@@ -585,7 +585,7 @@ block extendCodeGen:
         else: discard
 
     proc checkPropValueType(gen: CodeGen, key: string, valTy: Sym, errNode: Node) =
-      ## Static type check for dynamic property values (vars, bro calls,
+      ## Static type check for dynamic property values (vars, bowdy calls,
       ## infix). Literals are validated as text elsewhere; strings and other
       ## shapes stay legacy-lenient. Mismatched CSS value types are hard errors
       ## (e.g. `width: $colorVar` or `color: $lengthVar`). var() references
@@ -600,7 +600,7 @@ block extendCodeGen:
       collectAcceptedKinds(cssGetPropertySyntax(key), kinds, unknown, refVisited)
       # Empty sets (margin via property refs, unknown shorthands) accept all.
       # Otherwise a typed value outside the known members is a hard error even
-      # when exotic alternatives exist — no bro runtime value inhabits those.
+      # when exotic alternatives exist — no bowdy runtime value inhabits those.
       if kinds.len == 0: return
       var actual = valTy.tyKind
       if valTy.kind in {skVar, skLet, skConst} and valTy.varTy != nil:
@@ -725,7 +725,7 @@ block extendCodeGen:
 
     proc valueNeedsVm(gen: CodeGen, v: Node): bool =
       ## True when a property value cannot be rendered statically: a `$var`
-      ## reference, a bro value-function call, or a compound containing one.
+      ## reference, a bowdy value-function call, or a compound containing one.
       ## Static rendering would leak `$name` or call source text into the CSS.
       case v.kind
       of nkIdent:
@@ -740,7 +740,7 @@ block extendCodeGen:
 
     proc emitVmPropValue(gen: CodeGen, key: string, v, errNode: Node, isLast: bool) =
       ## Emit `key:<evaluated>[;]` as raw text for dynamic values: `$var`
-      ## references resolve against runtime scope (globals included), bro
+      ## references resolve against runtime scope (globals included), bowdy
       ## calls evaluate to strictly typed values rendered via their tag.
       gen.chunk.emit(opcPushS)
       gen.chunk.emit(gen.chunk.getString(key & ":"))
@@ -1210,7 +1210,7 @@ block extendCodeGen:
           hasDuplicate = true
         let isVarRef = prop[1].kind == nkIdent and prop[1].ident.len > 0 and prop[1].ident[0] == '$'
 
-        # Validate CSS property value for literal values. Bro calls evaluate
+        # Validate CSS property value for literal values. bowdy calls evaluate
         # to typed values at runtime, so they take the dynamic path instead.
         if not isVarRef and not gen.isBroCall(prop[1]) and prop[1].kind in {nkIdent, nkInt, nkFloat, nkString, nkUnit, nkColor, nkExprList, nkCommaList, nkCall, nkPostfix}:
           var rawCss = nodeToCssString(prop[1])
@@ -1275,7 +1275,7 @@ block extendCodeGen:
               gen.chunk.emit(gen.chunk.getString(resolvePropValue(key, nodeToCssString(prop[1]), prop[1], prop)))
               newType(ttyString, name = prop[1])
             else:
-              # Bro calls (lighten, parseLength, ...), infix and other dynamic
+              # bowdy calls (lighten, parseLength, ...), infix and other dynamic
               # expressions evaluate to strictly typed runtime values.
               let vt = gen.genExpr(prop[1])
               checkPropValueType(gen, key, vt, prop[1])
@@ -1656,7 +1656,7 @@ block extendVM:
 
 block extendJitProcs:
   # Shared emit implementations: the interpreter branches below call them,
-  # and the JIT emit bridges (bro/engine/jitbridge.nim) call the same
+  # and the JIT emit bridges (bowdy/engine/jitbridge.nim) call the same
   # procs, so native and interpreted emission cannot drift apart.
 
   extendModule "vancode" / "interpreter" / "jit" / "host_emit.nim":
@@ -1839,10 +1839,10 @@ block extendJitProcs:
         vm.globals["__bro_atline"] = initValue(true)
 
 block extendJit:
-  # JIT admission + emission for bro's opcodes and the string/object
+  # JIT admission + emission for bowdy's opcodes and the string/object
   # plumbing its chunks use. Injected branches resolve names at the vancode
   # expansion site, so emission goes through vancode-owned host_emit
-  # one-liners; bro behavior arrives as registered host bridges.
+  # one-liners; bowdy behavior arrives as registered host bridges.
   extendCaseStmt "vmJitDynasmAllowCase":
     case oc:
     of opcPushS, opcPushF, opcPushG, opcPopG, opcConcatStr,

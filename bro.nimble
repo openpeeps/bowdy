@@ -6,8 +6,8 @@ description   = "A super fast CSS preprocessor for cool kids!"
 license       = "LGPL-3.0-or-later"
 srcDir        = "src"
 installExt    = @["nim"]
-installDirs   = @["bro"]
-bin           = @["bro"]
+installDirs   = @["bowdy"]
+bin           = @["bowdy"]
 binDir        = "bin"
 
 

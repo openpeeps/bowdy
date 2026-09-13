@@ -2,12 +2,12 @@ import unittest
 import std/[monotimes, options, os, strutils, times]
 import pkg/openparser/json
 
-import ../src/bro/engine/vancodegen
-import ../src/bro/engine/parser
+import ../src/bowdy/engine/vancodegen
+import ../src/bowdy/engine/parser
 
 import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value]
 
-import ../src/bro/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
+import ../src/bowdy/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
 
 proc generate(count: int): string =
   var buf: string

@@ -1,8 +1,8 @@
-import bro
+import bowdy
 import unittest
 import std/[os, strutils]
 
-suite "embed Bro as a library":
+suite "embed bowdy as a library":
   test "compile string to css":
     let r = compileStylesheet(".a\n  color: red")
     check r.ok

@@ -1,12 +1,12 @@
-# Bro JIT bridges: native implementations of bro's opcodes and the
+# bowdy JIT bridges: native implementations of bowdy's opcodes and the
 # string/object plumbing its chunks use.
 #
 # (c) 2026 George Lemon | LGPL-v3 License
 #          Made by Humans from OpenPeeps
-#          https://github.com/openpeeps/bro
+#          https://github.com/openpeeps/bowdy
 #
 # These are the runtime half of the `extendJit` block in
-# `bro/engine/vancodegen.nim` (admission + emission); the compile-time half
+# `bowdy/engine/vancodegen.nim` (admission + emission); the compile-time half
 # lives there as one-liner `host_emit` calls so all machine-code knowledge
 # stays vancode-owned. Every bridge mirrors its interpreter branch exactly:
 # same pops, same pushes, same field accesses (including the same raises on
@@ -194,7 +194,7 @@ proc broJitGetOutput*(vmPtr: pointer): Value {.nimcall.} =
 var broJitRegistered = false
 
 proc initBroJit*(vm: Vm) =
-  ## Register bro's bridges before the first JIT compile and install the
+  ## Register bowdy's bridges before the first JIT compile and install the
   ## main-chunk output hook (without it the main JIT stays disabled).
   ## Idempotent per process for the bridges; the output hook is per-VM.
   ##
