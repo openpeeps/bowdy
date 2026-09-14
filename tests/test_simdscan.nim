@@ -97,3 +97,23 @@ suite "simdscan span scanners":
     check scanDigits(buf(s), 9, s.len) == 4
     check scanUnitTail(buf(s), 18, s.len) == 2
     check scanSpaces(buf(s), s.len, s.len) == 0
+
+  test "offsetUntil with non-zero pos across vector strides":
+    # Regression for arm64 Neon helper that mixed absolute/offset returns:
+    # every hit position with every start pos must agree with scalar.
+    for start in [0, 1, 2, 5, 15, 16, 17, 20]:
+      for n in 0 .. 40:
+        let s = "x".repeat(64) & "*" & "y".repeat(16)
+        let hitPos = 64
+        if start <= hitPos:
+          check offsetUntilByte(buf(s), start, s.len, '*') == hitPos - start
+        let e = "a".repeat(64) & "\n" & "b".repeat(16)
+        if start <= 64:
+          check offsetUntilEither(buf(e), start, e.len, '\n', '\r') == 64 - start
+    # hit inside second vector with non-zero start
+    let s2 = "0123456789ABCDEF0123456789ABCDEF--*--"
+    check offsetUntilByte(buf(s2), 2, s2.len, '*') == 32
+    check offsetUntilByte(buf(s2), 20, s2.len, '*') == 14
+    # comment-style: '//' body then newline, starting mid-buffer
+    let c = "//0123456789ABCDEF0123456789ABCDEF\n.x"
+    check offsetUntilEither(buf(c), 2, c.len, '\n', '\r') == 32

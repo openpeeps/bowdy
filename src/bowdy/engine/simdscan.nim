@@ -181,11 +181,12 @@ elif defined(arm64):
 
   func maskRun8(x: uint8x8): int {.inline.} =
     ## Leading 0xFF-byte run over 8 lanes. Compare intrinsics emit full
-    ## bytes only, so `ctz div 8` counts whole matching lanes; all-match
-    ## guards the undefined ctz(0xFFFF...).
+    ## bytes only, so `ctz(~w) div 8` counts whole matching lanes: matching
+    ## lanes are 1-bits, so trailing *ones* are the leading run. All-match
+    ## guards the undefined ctz(0) on `~w == 0`.
     let w = vget_lane_u64(vreinterpret_u64_u8(x), 0'i32)
     if w == high(uint64): 8
-    else: countTrailingZeroBits(w) div 8
+    else: countTrailingZeroBits(not w) div 8
 
   func findIn8(x: uint8x8): int {.inline.} =
     ## First 0xFF-lane index in 8 lanes, or -1.
@@ -257,15 +258,17 @@ elif defined(arm64):
 
   func offsetUntilNeon(p: ptr UncheckedArray[char], pos, stop: int,
       c1, c2: uint8x16, two: bool): int {.inline.} =
+    ## Absolute index of the first match at or after pos, or the first
+    ## unscanned index when no vector lane hit (callers finish scalar).
     var i = pos
     while i + 16 <= stop:
       let v = vld1q_u8(cast[pointer](addr p[i]))
       var m = vceqq_u8(v, c1)
       if two: m = vorrq_u8(m, vceqq_u8(v, c2))
       let f0 = findIn8(vget_low_u8(m))
-      if f0 >= 0: return i + f0 - pos
+      if f0 >= 0: return i + f0
       let f1 = findIn8(vget_high_u8(m))
-      if f1 >= 0: return i + 8 + f1 - pos
+      if f1 >= 0: return i + 8 + f1
       i += 16
     i
 
