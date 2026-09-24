@@ -26,9 +26,6 @@ proc pioneerStrBridge(procId: int32, flatArgs: ptr int64, argc: int32,
   ## GC-rooted ring index (raw pointers are invisible to the GC).
   let v = initValue("pioneer-ok")
   result = bridge.jitRootValue(v)
-  # DBG-ARM64: prove the bridge ran and show the issued index.
-  stderr.writeLine "DBG bridge ran argc=", argc, " idx=", result,
-    " low12=", (result and 0xFFF), " occ=", bridge.jitRingOccupancy()
 
 proc buildCaller(script: Script, file: string, callee: Proc,
     pushVals: openArray[int64]): Proc =
@@ -89,18 +86,11 @@ suite "bowdy jit: foreign fast paths":
     let fn = cdyn.compileProc(vm, caller)
     check fn != nil
     let res = fn(nil, 0)
-    # DBG-ARM64: trace the index across the native boundary.
-    stderr.writeLine "DBG res isNil=", (res == nil),
-      " type=", (if res == nil: -1 else: res.typeId.ord),
-      " intVal=", (if res == nil: 0 else: res.intVal),
-      " low12=", (if res == nil: 0 else: (res.intVal and 0xFFF)),
-      " occ=", bridge.jitRingOccupancy()
     # closure sees the raw int64 (ring index); resolve it back to the Value
     let v = bridge.jitUnrootValue(res.intVal)
     check v != nil
-    if v != nil: # DBG-ARM64: avoid cascading SIGSEGV so later tests still run
-      check v.typeId == tyString
-      check v.stringVal[] == "pioneer-ok"
+    check v.typeId == tyString
+    check v.stringVal[] == "pioneer-ok"
 
   test "exceptions raised in bridges propagate through JIT frames":
     let (script, vm) = newEnv("jit_pioneer_raise")
@@ -111,19 +101,13 @@ suite "bowdy jit: foreign fast paths":
     callee.procId = script.procs.len
     script.procs.add(callee)
     let caller = buildCaller(script, "jit_pioneer_raise", callee, [])
-    # DBG-ARM64: verify compile inputs; a stale fast-hit here means
-    # the wrong bridge gets baked into this test's machine code.
-    stderr.writeLine "DBG t3 calleeId=", callee.procId, " callerId=", caller.procId,
-      " fastHit=", (bridge.findJitForeignFast(callee.name, callee.paramCount) != nil)
     let fn = cdyn.compileProc(vm, caller)
     check fn != nil
     var raised = false
-    stderr.writeLine "DBG t3 entering fn"
     try:
       discard fn(nil, 0)
     except ValueError:
       raised = true
-    stderr.writeLine "DBG t3 exited fn raised=", raised
     check raised
 
   test "unregistered foreign keeps the generic bridge":
@@ -135,12 +119,8 @@ suite "bowdy jit: foreign fast paths":
     script.procs.add(callee)
     # NOTE: no registerJitForeignFast — miss must stay correct via fallback
     let caller = buildCaller(script, "jit_pioneer_slow", callee, [])
-    stderr.writeLine "DBG t4 calleeId=", callee.procId, " callerId=", caller.procId,
-      " fastHit=", (bridge.findJitForeignFast(callee.name, callee.paramCount) != nil)
     let fn = cdyn.compileProc(vm, caller)
     check fn != nil
-    stderr.writeLine "DBG t4 entering fn"
     let res = fn(nil, 0)
-    stderr.writeLine "DBG t4 exited fn type=", res.typeId.ord, " intVal=", res.intVal
     check res.typeId == tyInt
     check res.intVal == 7
