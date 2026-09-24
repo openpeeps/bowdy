@@ -26,6 +26,9 @@ proc pioneerStrBridge(procId: int32, flatArgs: ptr int64, argc: int32,
   ## GC-rooted ring index (raw pointers are invisible to the GC).
   let v = initValue("pioneer-ok")
   result = bridge.jitRootValue(v)
+  # DBG-ARM64: prove the bridge ran and show the issued index.
+  stderr.writeLine "DBG bridge ran argc=", argc, " idx=", result,
+    " low12=", (result and 0xFFF), " occ=", bridge.jitRingOccupancy()
 
 proc buildCaller(script: Script, file: string, callee: Proc,
     pushVals: openArray[int64]): Proc =
@@ -86,11 +89,18 @@ suite "bowdy jit: foreign fast paths":
     let fn = cdyn.compileProc(vm, caller)
     check fn != nil
     let res = fn(nil, 0)
+    # DBG-ARM64: trace the index across the native boundary.
+    stderr.writeLine "DBG res isNil=", (res == nil),
+      " type=", (if res == nil: -1 else: res.typeId.ord),
+      " intVal=", (if res == nil: 0 else: res.intVal),
+      " low12=", (if res == nil: 0 else: (res.intVal and 0xFFF)),
+      " occ=", bridge.jitRingOccupancy()
     # closure sees the raw int64 (ring index); resolve it back to the Value
     let v = bridge.jitUnrootValue(res.intVal)
     check v != nil
-    check v.typeId == tyString
-    check v.stringVal[] == "pioneer-ok"
+    if v != nil: # DBG-ARM64: avoid cascading SIGSEGV so later tests still run
+      check v.typeId == tyString
+      check v.stringVal[] == "pioneer-ok"
 
   test "exceptions raised in bridges propagate through JIT frames":
     let (script, vm) = newEnv("jit_pioneer_raise")
