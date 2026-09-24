@@ -111,13 +111,19 @@ suite "bowdy jit: foreign fast paths":
     callee.procId = script.procs.len
     script.procs.add(callee)
     let caller = buildCaller(script, "jit_pioneer_raise", callee, [])
+    # DBG-ARM64: verify compile inputs; a stale fast-hit here means
+    # the wrong bridge gets baked into this test's machine code.
+    stderr.writeLine "DBG t3 calleeId=", callee.procId, " callerId=", caller.procId,
+      " fastHit=", (bridge.findJitForeignFast(callee.name, callee.paramCount) != nil)
     let fn = cdyn.compileProc(vm, caller)
     check fn != nil
     var raised = false
+    stderr.writeLine "DBG t3 entering fn"
     try:
       discard fn(nil, 0)
     except ValueError:
       raised = true
+    stderr.writeLine "DBG t3 exited fn raised=", raised
     check raised
 
   test "unregistered foreign keeps the generic bridge":
@@ -129,8 +135,12 @@ suite "bowdy jit: foreign fast paths":
     script.procs.add(callee)
     # NOTE: no registerJitForeignFast — miss must stay correct via fallback
     let caller = buildCaller(script, "jit_pioneer_slow", callee, [])
+    stderr.writeLine "DBG t4 calleeId=", callee.procId, " callerId=", caller.procId,
+      " fastHit=", (bridge.findJitForeignFast(callee.name, callee.paramCount) != nil)
     let fn = cdyn.compileProc(vm, caller)
     check fn != nil
+    stderr.writeLine "DBG t4 entering fn"
     let res = fn(nil, 0)
+    stderr.writeLine "DBG t4 exited fn type=", res.typeId.ord, " intVal=", res.intVal
     check res.typeId == tyInt
     check res.intVal == 7
