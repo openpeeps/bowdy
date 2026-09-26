@@ -2110,7 +2110,7 @@ prefixHandle parseFor:
               result.add(newChild)
         elif (iterExpr.kind == nkArray) or (iterExpr.kind == nkIdent and
             (p.arrayLits.hasKey(iterExpr.ident) or p.arrayLits.hasKey(normVarName(iterExpr.ident)))):
-          # array-of-objects unroll (e.g. for $s in [{k:0,v:0}, {k:1,v:0.25rem}] or for $s in $spacings)
+          # array-of-objects unroll (e.g. for s in [{k:0,v:0}, {k:1,v:0.25rem}] or for s in $spacings)
           var arrNode: Node
           if iterExpr.kind == nkArray:
             arrNode = iterExpr

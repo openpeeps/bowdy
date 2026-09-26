@@ -84,7 +84,7 @@ var radius = 4px
 ```css
 .card{color:#0d6efd;border-radius:4px}
 ```
-Variables use `var` / `const`, support interpolation (`$primary`), and are checked against CSS property types — the compiler rejects mismatches such as `width: red`.
+Variables use `var` / `const`, support interpolation (`$primary`), and are checked against CSS property types — the compiler rejects mismatches such as `width: red`. Definitions are always bare (`var primary = ...`); `$primary` or `_primary` at definition is a parse error, and use sites always require the `$` prefix.
 CSS custom properties take part in the same system: `var(--x)` parses as a real call returning a typed `cssvar` value, so custom-property names stay atomic (`var(--color-gray-100)` is never re-split) and use sites check structurally. Every `--x` declaration (entry file and imports, order-independent) registers its inferred type, so under `--strict` `color: var(--fs-medium)` is a hard error when `--fs-medium` holds a size. Undeclared names only warn (they may come from plain-CSS imports or JS), `var(--x, fallback)` validates the fallback too, and `env()` is left alone. The CLI collects warnings during a compile and prints them with `displayWarning` once the CSS is out.
 
 ### 2. Nesting
@@ -116,7 +116,7 @@ mixin btn(color: color) {
 ```css
 .a{color:red;border-radius:4px}
 ```
-Mixins accept typed parameters, support named arguments (`@box($h = 5px, $w = 10px)`), and can contain nested selectors.
+Mixins accept typed parameters, support named arguments (`@box($h = 5px, $w = 10px)`), and can contain nested selectors. Parameters are defined bare (`color: color`) and used with `$` (`$color`); indent bodies require `=` (`mixin btn(color: color) =`), brace bodies use a bare `{ ... }`.
 
 ### 4. Control Flow and Code Generation
 
@@ -171,7 +171,7 @@ var p = dbl(21)
 ```css
 .a{z-index:42}
 ```
-`func` is an alias for `fn`. Functions support overloading and forward declarations.
+`func` is an alias for `fn`. Functions support overloading and forward declarations. Parameters are defined bare and used with `$`; indent bodies require `=` as above, while a brace body uses a bare `{ ... }` (`func dbl(n: int): int { return $n * 2 }`).
 
 ### 7. Embed bowdy in your Nim app
 
