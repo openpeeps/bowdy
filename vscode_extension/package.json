@@ -1,0 +1,40 @@
+{
+  "name": "bowdycss",
+  "displayName": "Bowdy CSS",
+  "description": "Syntax highlighting for Bowdy CSS Preprocessor",
+  "icon": "assets/logo.png",
+  "keywords": [
+    "style",
+    "stylesheet",
+    "sass",
+    "scss",
+    "css"
+  ],
+  "repository": "https://github.com/openpeeps/bowdy",
+  "publisher": "openpeeps",
+  "version": "0.0.2",
+  "engines": {
+    "vscode": ">=1.106.3"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "bowdy",
+      "aliases": ["bowdy", "BowdyCSS"],
+      "extensions": [".bass"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [
+      {
+        "language": "bowdy",
+        "scopeName": "source.bowdy",
+        "path": "./syntaxes/bowdy.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.css": "css"
+        }
+      }
+    ]
+  }
+}

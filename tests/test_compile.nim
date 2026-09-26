@@ -307,29 +307,29 @@ suite "compilation tests":
 
   test "compile variable declaration and usage":
     let css = compile("""
-  var $primary = red
+  var primary = red
   .foo { color: $primary; }
   """)
     check css == ".foo{color:#ff0000}"
 
   test "compile var declaration":
     let css = compile("""
-  var $size = 16px
+  var size = 16px
   .foo { font-size: $size; }
   """)
     check css == ".foo{font-size:16px}"
 
   test "compile multiple variable usage":
     let css = compile("""
-  var $a = 10
-  var $b = 20
+  var a = 10
+  var b = 20
   .foo { width: $a; height: $b; }
   """)
     check css == ".foo{width:10;height:20}"
 
   test "bare declaration registers dollar var":
     let css = compile("""
-  var $radius = 4px
+  var radius = 4px
   var xxx = $radius - 3px
   .foo { width: $xxx; }
   """)
@@ -351,7 +351,7 @@ suite "compilation tests":
 
   test "compile variable reference in selector block":
     let css = compile("""
-  var $col = blue
+  var col = blue
   .foo
     color: $col
     background: $col
@@ -360,14 +360,14 @@ suite "compilation tests":
 
   test "compile arithmetic in value":
     let css = compile("""
-  var $base = 10
+  var base = 10
   .foo { width: $base + 5; }
   """)
     check css == ".foo{width:15}"
 
   test "compile string variable":
     let css = compile("""
-  var $name = "hello"
+  var name = "hello"
   .foo { content: $name; }
   """)
     check css == ".foo{content:hello}"
@@ -735,7 +735,7 @@ suite "Phase 2: Sass-style nesting":
       ".parent{@media (max-width: 768px){.child{color:#0000ff}}}"
 
   test "nesting with var() reference":
-    check compile("var $col = blue\n.parent\n  .child\n    color: $col") ==
+    check compile("var col = blue\n.parent\n  .child\n    color: $col") ==
       ".parent .child{color:#0000ff}"
 
   test "nesting preserves selector type (id)":
@@ -789,7 +789,7 @@ suite "Phase 2: Sass-style nesting":
       ".parent .child{color:#ff0000 !important;font-size:14px}"
 
   test "nesting with var() on child":
-    check compile("var $c = red\n.parent\n  .child\n    color: $c") ==
+    check compile("var c = red\n.parent\n  .child\n    color: $c") ==
       ".parent .child{color:#ff0000}"
 
   test "nesting + at-rule interleave":
@@ -872,7 +872,7 @@ suite "Phase 4: numeric edge cases":
     check compile(".a { width: 12em; }") == ".a{width:12em}"
 
   test "arithmetic still uses infix plus":
-    check compile("var $base = 10\n.a { width: $base + 5; }") == ".a{width:15}"
+    check compile("var base = 10\n.a { width: $base + 5; }") == ".a{width:15}"
 
   test "integral float renders without .0":
     check compile(".a { opacity: 1.0; }") == ".a{opacity:1}"
@@ -903,7 +903,7 @@ suite "Phase 5: mixins":
       ".a{width:10px;height:20px}"
 
   test "mixin with variable argument":
-    check compile("mixin btn(color: color) =\n  color: $color\nvar $c = blue\n.a\n  @btn($c)") ==
+    check compile("mixin btn(color: color) =\n  color: $color\nvar c = blue\n.a\n  @btn($c)") ==
       ".a{color:#0000ff}"
 
   test "mixin named arguments (dollar form)":
@@ -937,8 +937,8 @@ suite "Phase 5: mixins":
     check compile("mixin btn(color: color) =\n  color: $color\n  border-radius: 4px\n.a\n  @btn(red)") ==
       ".a{color:#ff0000;border-radius:4px}"
 
-  test "mixin with equals before brace body":
-    check compile("mixin btn(color: color) = {\n  color: $color;\n}\n.a {\n  @btn(blue)\n}") ==
+  test "mixin with brace body (no equals)":
+    check compile("mixin btn(color: color) {\n  color: $color;\n}\n.a {\n  @btn(blue)\n}") ==
       ".a{color:#0000ff}"
 
   test "mixin without equals raises error":
@@ -963,11 +963,11 @@ suite "Phase 5: mixins":
     check "^" in ctx
 
   test "mixin body resolves outer length var":
-    check compile("var $radius = 4px\nmixin btn(color: color) =\n  color: $color\n  border-radius: $radius\n.a\n  @btn(red)") ==
+    check compile("var radius = 4px\nmixin btn(color: color) =\n  color: $color\n  border-radius: $radius\n.a\n  @btn(red)") ==
       ".a{color:#ff0000;border-radius:4px}"
 
   test "mixin arg accepts outer color var":
-    check compile("var $primary = #0d6efd\nmixin btn(color: color) =\n  color: $color\n.a\n  @btn($primary)") ==
+    check compile("var primary = #0d6efd\nmixin btn(color: color) =\n  color: $color\n.a\n  @btn($primary)") ==
       ".a{color:#0d6efd}"
 
   test "mixin bowdy-call with named color arg":
@@ -975,7 +975,7 @@ suite "Phase 5: mixins":
       ".a{color:#cc0000}"
 
   test "mixin nested selector resolves outer var":
-    check compile("var $primary = #0d6efd\nmixin card =\n  .icon\n    color: $primary\n.a\n  @card()") ==
+    check compile("var primary = #0d6efd\nmixin card =\n  .icon\n    color: $primary\n.a\n  @card()") ==
       ".a .icon{color:#0d6efd}"
 
   test "mixin parent ref in indented body":
@@ -987,27 +987,27 @@ suite "Phase 5: mixins":
       ".a{color:#ff0000}.a:hover{color:#0000ff}"
 
   test "comments interleaved with loops and nesting":
-    check compile("// lead\nvar $debug = true\nfor $i in range(1, 2):\n  .z-${$i}\n    z-index: $i\n// mid\n.card\n  color: #333\n  // inner\n  .title\n    font-weight: bold\n// trail") ==
+    check compile("// lead\nvar debug = true\nfor i in range(1, 2):\n  .z-${$i}\n    z-index: $i\n// mid\n.card\n  color: #333\n  // inner\n  .title\n    font-weight: bold\n// trail") ==
       ".z-1{z-index:1}.z-2{z-index:2}.card{color:#333}.card .title{font-weight:bold}"
 
   test "multi-value with vars evaluates":
-    check compile("var $a = 1px\nvar $b = 2px\n.a\n  margin: $a $b") ==
+    check compile("var a = 1px\nvar b = 2px\n.a\n  margin: $a $b") ==
       ".a{margin:1px 2px}"
 
   test "multi-value mixing literals and vars":
-    check compile("var $c = red\n.a\n  border: 1px solid $c") ==
+    check compile("var c = red\n.a\n  border: 1px solid $c") ==
       ".a{border:1px solid #ff0000}"
 
   test "multi-value comma list with vars":
-    check compile("var $c = red\nvar $d = blue\n.a\n  box-shadow: 0 1px $c, inset 0 0 $d") ==
+    check compile("var c = red\nvar d = blue\n.a\n  box-shadow: 0 1px $c, inset 0 0 $d") ==
       ".a{box-shadow:0 1px #ff0000, inset 0 0 #0000ff}"
 
   test "multi-value with vars in mixin body":
-    check compile("var $a = 1px\nvar $b = 2px\nmixin m =\n  margin: $a $b\n.a\n  @m()") ==
+    check compile("var a = 1px\nvar b = 2px\nmixin m =\n  margin: $a $b\n.a\n  @m()") ==
       ".a{margin:1px 2px}"
 
   test "multi-value with loop var and static":
-    check compile("for $i in range(1, 3):\n  .p-${$i}\n    margin: ${$i}px auto") ==
+    check compile("for i in range(1, 3):\n  .p-${$i}\n    margin: ${$i}px auto") ==
       ".p-1{margin:1px auto}.p-2{margin:2px auto}.p-3{margin:3px auto}"
 
   test "static multi-value still validates strictly":
@@ -1022,53 +1022,53 @@ suite "Phase 5: control flow inside rule bodies":
     check compile(".a\n  if false:\n    color: red\n  color: blue") == ".a{color:#0000ff}"
 
   test "if with variable condition":
-    check compile("var $debug = true\n.a\n  if $debug:\n    outline: 1px") == ".a{outline:1px}"
+    check compile("var debug = true\n.a\n  if $debug:\n    outline: 1px") == ".a{outline:1px}"
 
   test "if else branches":
-    check compile("var $m = false\n.a\n  if $m:\n    color: red\n  else:\n    color: blue") == ".a{color:#0000ff}"
+    check compile("var m = false\n.a\n  if $m:\n    color: red\n  else:\n    color: blue") == ".a{color:#0000ff}"
 
   test "for range loop emits repeated properties":
-    check compile(".a\n  for $i in range(1, 3):\n    z-index: $i") == ".a{z-index:1;z-index:2;z-index:3}"
+    check compile(".a\n  for i in range(1, 3):\n    z-index: $i") == ".a{z-index:1;z-index:2;z-index:3}"
 
   test "loop var with attached unit suffix":
-    check compile("for $i in range(1, 3):\n  .p-${$i}\n    padding: ${$i}px") ==
+    check compile("for i in range(1, 3):\n  .p-${$i}\n    padding: ${$i}px") ==
       ".p-1{padding:1px}.p-2{padding:2px}.p-3{padding:3px}"
 
   test "loop var arithmetic with units":
-    check compile("for $i in range(1, 3):\n  .p-${$i}\n    padding: $i * 1px") ==
+    check compile("for i in range(1, 3):\n  .p-${$i}\n    padding: $i * 1px") ==
       ".p-1{padding:1px}.p-2{padding:2px}.p-3{padding:3px}"
 
   test "loop var arithmetic with units reversed":
-    check compile("for $i in range(1, 3):\n  .p-${$i}\n    padding: 1px * $i") ==
+    check compile("for i in range(1, 3):\n  .p-${$i}\n    padding: 1px * $i") ==
       ".p-1{padding:1px}.p-2{padding:2px}.p-3{padding:3px}"
 
   test "interpolation with attached literal unit":
     check compile(".a\n  width: ${3}px") == ".a{width:3px}"
 
   test "for over array of objects":
-    check compile("var $s = [{k: 0, v: 0}, {k: 1, v: 0.25rem}]\nfor $item in $s:\n  .p-${$item.k}\n    padding: $item.v") == ".p-0{padding:0}.p-1{padding:0.25rem}"
+    check compile("var s = [{k: 0, v: 0}, {k: 1, v: 0.25rem}]\nfor item in $s:\n  .p-${$item.k}\n    padding: $item.v") == ".p-0{padding:0}.p-1{padding:0.25rem}"
 
   test "for over inline array of objects":
-    check compile("for $s in [{k: 0, v: 0}, {k: 1, v: 1rem}]:\n  .m-${$s.k}\n    margin: $s.v") == ".m-0{margin:0}.m-1{margin:1rem}"
+    check compile("for s in [{k: 0, v: 0}, {k: 1, v: 1rem}]:\n  .m-${$s.k}\n    margin: $s.v") == ".m-0{margin:0}.m-1{margin:1rem}"
 
   test "control flow with surrounding properties":
-    check compile("var $on = true\n.a\n  color: red\n  if $on:\n    top: 1px\n  background: blue") == ".a{color:#ff0000;top:1px;background:#0000ff}"
+    check compile("var on = true\n.a\n  color: red\n  if $on:\n    top: 1px\n  background: blue") == ".a{color:#ff0000;top:1px;background:#0000ff}"
 
   test "property before taken if keeps separator":
-    check compile("var $on = true\n.a\n  color: red\n  if $on:\n    outline: 1px") == ".a{color:#ff0000;outline:1px}"
+    check compile("var on = true\n.a\n  color: red\n  if $on:\n    outline: 1px") == ".a{color:#ff0000;outline:1px}"
 
   test "property before untaken if has no trailing semicolon":
-    check compile("var $on = false\n.a\n  color: red\n  if $on:\n    outline: 1px") == ".a{color:#ff0000}"
+    check compile("var on = false\n.a\n  color: red\n  if $on:\n    outline: 1px") == ".a{color:#ff0000}"
 
   test "if inside nested rule stays inside the block":
-    check compile("var $on = true\n.card\n  color: red\n  .title\n    font-weight: bold\n  if $on:\n    outline: 1px") ==
+    check compile("var on = true\n.card\n  color: red\n  .title\n    font-weight: bold\n  if $on:\n    outline: 1px") ==
       ".card{color:#ff0000;outline:1px}.card .title{font-weight:bold}"
 
   test "while loop with counter":
-    check compile("var $i = 0\n.a\n  while $i < 2\n    z-index: $i\n    $i = $i + 1") == ".a{z-index:0;z-index:1}"
+    check compile("var i = 0\n.a\n  while $i < 2\n    z-index: $i\n    $i = $i + 1") == ".a{z-index:0;z-index:1}"
 
   test "control flow inside mixin":
-    check compile("var $v = true\nmixin m =\n  if $v:\n    color: green\n.a\n  @m()") == ".a{color:#008000}"
+    check compile("var v = true\nmixin m =\n  if $v:\n    color: green\n.a\n  @m()") == ".a{color:#008000}"
 
   test "at-rule still parses after @ in rule bodies":
     check compile(".a\n  @media (max-width: 768px)\n    color: red") ==
@@ -1076,20 +1076,48 @@ suite "Phase 5: control flow inside rule bodies":
 
 suite "Phase 5: fn / func aliases":
   test "fn keyword evaluates in expression position":
-    check compile("fn dbl($n: int): int\n  return $n * 2\nvar $p = dbl(21)\n.a { z-index: $p }") ==
+    check compile("fn dbl(n: int): int =\n  return $n * 2\nvar p = dbl(21)\n.a { z-index: $p }") ==
       ".a{z-index:42}"
 
   test "func alias works identically":
-    check compile("func dbl($n: int): int\n  return $n * 2\nvar $p = dbl(21)\n.a { z-index: $p }") ==
+    check compile("func dbl(n: int): int {\n  return $n * 2\n}\nvar p = dbl(21)\n.a { z-index: $p }") ==
       ".a{z-index:42}"
 
   test "fn with equals before indented body":
-    check compile("fn dbl($n: int): int =\n  return $n * 2\nvar $p = dbl(21)\n.a { z-index: $p }") ==
+    check compile("fn dbl(n: int): int =\n  return $n * 2\nvar p = dbl(21)\n.a { z-index: $p }") ==
       ".a{z-index:42}"
 
-  test "fn with equals before brace body":
-    check compile("fn dbl($n: int): int = {\n  return $n * 2\n}\nvar $p = dbl(21)\n.a { z-index: $p }") ==
+  test "fn with brace body (no equals)":
+    check compile("fn dbl(n: int): int {\n  return $n * 2\n}\nvar p = dbl(21)\n.a { z-index: $p }") ==
       ".a{z-index:42}"
+
+  test "var definition with $ prefix raises error":
+    expect CatchableError:
+      discard compile("var $primary = red\n.a { color: $primary }")
+
+  test "var definition with _ prefix raises error":
+    expect CatchableError:
+      discard compile("var _primary = red\n.a { color: $primary }")
+
+  test "const definition with $ prefix raises error":
+    expect CatchableError:
+      discard compile("const $gap = 8px\n.a { margin: $gap }")
+
+  test "func param with $ prefix raises error":
+    expect CatchableError:
+      discard compile("func dbl($n: int): int =\n  return $n * 2")
+
+  test "func indent body without = raises error":
+    expect CatchableError:
+      discard compile("func dbl(n: int): int\n  return $n * 2")
+
+  test "func = with brace body raises error":
+    expect CatchableError:
+      discard compile("func dbl(n: int): int = {\n  return $n * 2\n}")
+
+  test "for loop var with $ prefix raises error":
+    expect CatchableError:
+      discard compile("for $i in range(1, 2):\n  .z-${$i}\n    z-index: $i")
 
 suite "Phase 6: modules (.bass imports)":
   let fixturesDir = currentSourcePath().parentDir / "stylesheets"
@@ -1265,7 +1293,7 @@ suite "Phase 6: typed var() references":
       discard compile(":root\n  --a: 1px\n  --b: var(--a)\n.c\n  color: var(--b)")
 
   test "bowdy var alias resolves":
-    check compile("var $c = red\n:root\n  --a: $c\n.b\n  color: var(--a)") ==
+    check compile("var c = red\n:root\n  --a: $c\n.b\n  color: var(--a)") ==
       ":root{--a:#ff0000}.b{color:var(--a)}"
 
   test "bowdy call declaration infers color":
@@ -1309,7 +1337,7 @@ suite "Phase 6: typed var() references":
       ":root{--brand-gray:#333}.b{border:1px solid var(--brand-gray)}"
 
   test "var name from $var renders":
-    check compile("var $n = \"--brand\"\n:root\n  --brand: red\n.c\n  color: var($n)") ==
+    check compile("var n = \"--brand\"\n:root\n  --brand: red\n.c\n  color: var($n)") ==
       ":root{--brand:red}.c{color:var(--brand)}"
 
   test "empty var() is a parse error":
@@ -1326,7 +1354,7 @@ suite "Phase 6: typed var() references":
     check "fallback" in msg
 
   test "loop var as var() fallback":
-    check compile("for $i in range(1, 2):\n  .z-${$i}\n    z-index: var(--z, $i)") ==
+    check compile("for i in range(1, 2):\n  .z-${$i}\n    z-index: var(--z, $i)") ==
       ".z-1{z-index:var(--z, 1)}.z-2{z-index:var(--z, 2)}"
 
   test "keyword fallback stays verbatim":
@@ -1404,7 +1432,7 @@ proc compileLenient(code: string): tuple[css: string, warned: seq[string]] =
 
 suite "lenient mode (default bowdy c, no --strict)":
   test "$var type mismatch compiles":
-    let (css, warned) = compileLenient("var $c = red\n.a\n  width: $c")
+    let (css, warned) = compileLenient("var c = red\n.a\n  width: $c")
     check css == ".a{width:#ff0000}"
     check warned.len == 0
 

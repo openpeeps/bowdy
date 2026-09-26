@@ -312,7 +312,7 @@ proc findNamedColorHex(name: string): string =
 proc convertNamedColor(p: var Parser, val: Node, hexify: bool): Node =
   ## Type a bare named color / transparent identifier as nkColor.
   ## hexify=true (variable initializers) resolves names to their hex spelling,
-  ## preserving the legacy `var $primary = red` -> #ff0000 conversion.
+  ## preserving the legacy `var primary = red` -> #ff0000 conversion.
   ## hexify=false keeps the raw spelling (property values, call args).
   ## `$vars`, calls and non-identifiers pass through untouched.
   result = val
@@ -338,6 +338,22 @@ proc convertNamedColor(p: var Parser, val: Node, hexify: bool): Node =
   result = ast.newNode(nkColor)
   result.add(ast.newStringLit(raw))
   result.ln = val.ln; result.col = val.col
+
+proc isBareDefName*(name: string): bool {.inline.} =
+  ## Definition-site names (`var`/`const`, fn/mixin/iterator params,
+  ## for-loop vars) must be bare identifiers starting with a letter.
+  ## `$name`, `_name` (and empty names) are rejected; use sites require `$`.
+  name.len > 0 and name[0] in {'A'..'Z', 'a'..'z'}
+
+proc checkDefName(p: var Parser, name, what: string) =
+  ## Fatal parse error when a definition-site name is not bare.
+  if not isBareDefName(name):
+    var i = 0
+    while i < name.len and name[i] in {'$', '_'}: inc i
+    let suggestion = "$" & name[i..^1]
+    p.error(what & " '" & name &
+      "' must start with a letter (a-z, A-Z); define it bare and use '" &
+      suggestion & "' at use sites)", fatal = true)
 
 proc normVarName*(name: string): string =
   ## Normalize a declared variable name: `var accent` registers `$accent`.
@@ -966,6 +982,9 @@ proc getVarIdent(p: var Parser, varIdent: bool): Node {.rule.} =
   # get the identifier name from the current token
   result = p.createIdentNode()
   if varIdent:
+    # Definitions are always bare (`var primary`, `func dbl(n: int)`):
+    # `$name` / `_name` are rejected here; `$name` is required at use sites.
+    p.checkDefName(result.ident, "identifier")
     # variable definitions can be suffixed with an asterisk
     # to mark them as exported (public)
     if p.curr is tkAsterisk:
@@ -973,10 +992,13 @@ proc getVarIdent(p: var Parser, varIdent: bool): Node {.rule.} =
       result = ast.newNode(nkPostfix).add([ast.newIdent("*"), result])
 
 proc parseIdentDefs(p: var Parser): Node {.rule.} =
-  ## Parse identifier definitions
+  ## Parse identifier definitions (fn/mixin/iterator params).
+  ## Definitions are bare (`n: int`); they normalize to `$n` for storage
+  ## so `$n` use sites resolve without codegen changes.
   result = newNode(nkIdentDefs)
   if p.curr.kind == tkIdentifier:
-    let identNode = p.getVarIdent(true)
+    var identNode = p.getVarIdent(true)
+    discard normVarNode(identNode)
     var
       ty = newEmpty()
       val = newEmpty()
@@ -1005,7 +1027,11 @@ proc parseIdentDefs(p: var Parser): Node {.rule.} =
         if ty.kind == nkEmpty and p.next is tkIdentifier:
           walk p # tkComma
           # parse another variable separated by a comma
-          vars.add(p.parseExpression())
+          let extra = p.parseExpression()
+          if extra != nil and extra.kind == nkIdent:
+            p.checkDefName(extra.ident, "identifier")
+            discard normVarNode(extra)
+          vars.add(extra)
         else: break
       else: break
     vars.add(ty)
@@ -1052,7 +1078,7 @@ prefixHandle parseVar:
     p.error(ErrUnexpectedToken % $p.curr.kind)
   walk p
   result.add(p.parseVarIdent())
-  # remember array literals for for-loop unrolling (var $a = [ ... ])
+  # remember array literals for for-loop unrolling (var a = [ ... ])
   if result.len > 0 and result[0].kind == nkIdentDefs:
     for child in result[0].children:
       if child.kind == nkAssign and child.len >= 3 and child[2].kind in {nkArray, nkObjectStorage}:
@@ -1124,6 +1150,7 @@ proc parseCommaIdentList(p: var Parser, start,
 proc parseFunctionHead(p: var Parser, isAnon: bool, name, formalParams: var Node) =
   # parse the function head
   if not isAnon:
+    p.checkDefName(p.curr.value, "function name")
     name = ast.newIdent(p.curr.value)
     walk p
     if p.curr is tkAsterisk:
@@ -1167,9 +1194,18 @@ proc parseBlock(p: var Parser, indentPos = 0,
       ):
     walk p # `=` (fn/mixin) or `:` separates the body
     if p.curr is tkLBrace:
-      # `= { ... }` brace body after the separator
-      closingBlock = true
-      walk p # tkLBrace
+      when parseFnBlock == true:
+        # Strict split: either `=` with an indented body or a bare
+        # `{ ... }` brace body. `= { ... }` is rejected.
+        p.error("unexpected '{' after '='; use either '=' with an indented body or '{ ... }' without '='", fatal = true)
+      else:
+        # `= { ... }` brace body after the separator
+        closingBlock = true
+        walk p # tkLBrace
+  elif parseFnBlock == true:
+    # Indent-based fn/mixin/iterator bodies require `=`; brace bodies
+    # use a bare `{ ... }`. A bare indented body without `=` is rejected.
+    p.error("expected '=' for indented body or '{' for brace body after function signature", fatal = true)
   let savedInBlockBody = p.inBlockBody
   p.inBlockBody = true
   defer: p.inBlockBody = savedInBlockBody
@@ -1698,6 +1734,7 @@ prefixHandle parseMixin:
   if p.curr.kind != tkIdentifier:
     p.error("expected mixin name after 'mixin'", fatal = true)
     return
+  p.checkDefName(p.curr.value, "mixin name")
   let name = ast.newIdent(p.curr.value)
   walk p
   var formalParams = newTree(nkFormalParams, newEmpty())
@@ -1705,15 +1742,8 @@ prefixHandle parseMixin:
     var params: seq[Node]
     if p.parseCommaIdentList(tkLParen, tkRParen, params):
       formalParams.add(params)
-  if p.curr is tkLBrace:
-    # Brace body needs no separator: `mixin btn(color: color) { ... }`.
-    discard
-  else:
-    # Indent body requires `=`: `mixin btn(color: color) =`.
-    if p.curr isnot tkAssign:
-      p.error("expected '=' after mixin signature", fatal = true)
-      return
-    walk p # tkAssign separates the indented body
+  # Body separator (`=` for indent, bare `{` for braces, never `= {`)
+  # is enforced inside parseBlock(parseFnBlock = true).
   let body: Node = p.parseBlock(mixpos, parseFnBlock = true, allowAmpSelector = true)
   caseNotNil body:
     result = ast.newTree(nkMixinDef, name, formalParams, body)
@@ -1810,14 +1840,23 @@ prefixHandle parseFor:
   let tokenFor: TokenTuple = p.curr
   if tokenFor.kind == tkKeywordFor:
     walk p # tkFor
+    if p.curr.kind != tkIdentifier:
+      p.error("expected loop variable after 'for'", fatal = true)
+      return
     var itemVar: Node
     if p.next is tkComma:
+      p.checkDefName(p.curr.value, "loop variable")
       itemVar = ast.newTree(nkBracket)
-      itemVar.add(ast.newIdent(p.curr.value))
+      itemVar.add(ast.newIdent(normVarName(p.curr.value)))
       walk p, 2 # tkComma
-      itemVar.add(ast.newIdent(p.curr.value))
+      if p.curr.kind != tkIdentifier:
+        p.error("expected loop variable after ','", fatal = true)
+        return
+      p.checkDefName(p.curr.value, "loop variable")
+      itemVar.add(ast.newIdent(normVarName(p.curr.value)))
     else:
-      itemVar = ast.newIdent(p.curr.value)
+      p.checkDefName(p.curr.value, "loop variable")
+      itemVar = ast.newIdent(normVarName(p.curr.value))
     walk p
     expectWalk(tkKeywordIn)
     p.inForIterable = true

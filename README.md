@@ -74,8 +74,8 @@ All examples are minified by default. Add `--pretty` for formatted output.
 ### 1. Variables
 
 ```bass
-var $primary = #0d6efd
-var $radius = 4px
+var primary = #0d6efd
+var radius = 4px
 
 .card
   color: $primary
@@ -121,7 +121,7 @@ Mixins accept typed parameters, support named arguments (`@box($h = 5px, $w = 10
 ### 4. Control Flow and Code Generation
 
 ```bass
-for $i in range(1, 3):
+for i in range(1, 3):
   .p-${$i}
     z-index: $i
 ```
@@ -139,14 +139,14 @@ var debug = true
     outline: none
 ```
 
-`for` also iterates over arrays of objects (`for $s in [{k:0,v:0}, {k:1,v:0.25rem}]`), `while`, and `case` / `of` are available.
+`for` also iterates over arrays of objects (`for s in [{k:0,v:0}, {k:1,v:0.25rem}]`), `while`, and `case` / `of` are available.
 
 ### 5. Imports
 
 ```bass
 // _vars.bass
-var $accent* = #0d6efd
-var $radius* = 4px
+var accent* = #0d6efd
+var radius* = 4px
 
 // main.bass
 import "./_vars.bass"
@@ -162,10 +162,10 @@ Export with `*`, import relative files or packages.
 ### 6. Functions
 
 ```bass
-fn dbl($n: int): int
+fn dbl(n: int): int =
   return $n * 2
 
-var $p = dbl(21)
+var p = dbl(21)
 .a { z-index: $p }
 ```
 ```css
@@ -181,7 +181,7 @@ Both return a `BroCompileResult` (`ok`, `css`, `warnings`, `error`):
 ```nim
 import bowdy
 
-let r = compileStylesheet("var $primary = #0d6efd\n.card\n  color: $primary")
+let r = compileStylesheet("var primary = #0d6efd\n.card\n  color: $primary")
 if r.ok:
   echo r.css
   for w in r.warnings: echo w

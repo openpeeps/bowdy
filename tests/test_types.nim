@@ -348,28 +348,28 @@ suite "CSS named colors to hex":
 suite "CSS type system — variable type checking":
   test "var color used in width property (type error)":
     let err = compileExpectError("""
-  var $primary = red
+  var primary = red
   .a { width: $primary; }
   """)
     check err.len > 0
 
   test "var length used in length property":
     let css = compileExpectSuccess("""
-  var $size = 16px
+  var size = 16px
   .a { font-size: $size; }
   """)
     check css == ".a{font-size:16px}"
 
   test "var length used in color property (type error)":
     let err = compileExpectError("""
-  var $size = 16px
+  var size = 16px
   .a { color: $size; }
   """)
     check err.len > 0
 
   test "var number used in number property":
     let css = compileExpectSuccess("""
-  var $n = 10
+  var n = 10
   .a { z-index: $n; }
   """)
     check css == ".a{z-index:10}"
@@ -377,8 +377,8 @@ suite "CSS type system — variable type checking":
 suite "CSS type system — strict typed values":
   test "length arithmetic in var":
     let css = compileExpectSuccess("""
-var $radius = 4px
-var $xxx = $radius - 3px
+var radius = 4px
+var xxx = $radius - 3px
 .a { width: $xxx; }
 """)
     check css == ".a{width:1px}"
@@ -386,31 +386,31 @@ var $xxx = $radius - 3px
   test "length addition":
     check compileExpectSuccess("echo 4px + 3px") == ""
     let css = compileExpectSuccess("""
-var $x = 4px + 3px
+var x = 4px + 3px
 .a { width: $x; }
 """)
     check css == ".a{width:7px}"
 
   test "angle arithmetic":
     let css = compileExpectSuccess("""
-var $a = 45deg
-var $b = $a + 15deg
+var a = 45deg
+var b = $a + 15deg
 .a { rotate: $b; }
 """)
     check css == ".a{rotate:60deg}"
 
   test "time subtraction":
     let css = compileExpectSuccess("""
-var $s = 2s
-var $t = $s - 1s
+var s = 2s
+var t = $s - 1s
 .a { transition-duration: $t; }
 """)
     check css == ".a{transition-duration:1s}"
 
   test "mismatched units are hard errors":
     let err = compileExpectError("""
-var $s = 2s
-var $t = $s - 500ms
+var s = 2s
+var t = $s - 500ms
 .a { transition-duration: $t; }
 """)
     check err.len > 0
@@ -418,7 +418,7 @@ var $t = $s - 500ms
 
   test "color function in color property":
     let css = compileExpectSuccess("""
-var $d = #336699
+var d = #336699
 .a { color: lighten($d, 10); }
 """)
     check css == ".a{color:#407fbf}"
@@ -428,7 +428,7 @@ var $d = #336699
     check css == ".a{color:#800080}"
 
   test "echo typed length":
-    check compileExpectSuccess("var $r = 4px\necho $r") == ""
+    check compileExpectSuccess("var r = 4px\necho $r") == ""
 
 suite "CSS type system — CSS-wide keywords":
   test "inherit on color":

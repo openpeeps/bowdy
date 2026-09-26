@@ -543,7 +543,7 @@ suite "parser tests":
 
   test "parse for loop with single variable":
     let sample = """
-  for $item in $items:
+  for item in $items:
     color: $item
   """
     var ast: Ast
@@ -558,7 +558,7 @@ suite "parser tests":
 
   test "parse for loop with two variables":
     let sample = """
-  for $index, $value in $array:
+  for index, value in $array:
     color: $value
   """
     var ast: Ast
@@ -582,7 +582,7 @@ suite "parser tests":
 
   test "parse function definition":
     let sample = """
-  function add(a, b)
+  function add(a, b) =
     return a + b
   """
     var ast: Ast
@@ -595,7 +595,7 @@ suite "parser tests":
 
   test "parse function with return type":
     let sample = """
-  function add(a: int, b: int): int
+  function add(a: int, b: int): int =
     return a + b
   """
     var ast: Ast
@@ -605,7 +605,7 @@ suite "parser tests":
 
   test "parse return statement":
     let sample = """
-  function foo()
+  function foo() =
     return 42
   """
     var ast: Ast
@@ -618,7 +618,7 @@ suite "parser tests":
 
   test "parse break and continue":
     let sample = """
-  for $x in $items:
+  for x in $items:
     if $x == 0:
       break
     if $x == 1:
@@ -753,7 +753,7 @@ suite "parser tests":
 
   test "parse for loop with brace block":
     let sample = """
-  for $item in $items {
+  for item in $items {
     color: item;
   }
   """
@@ -816,7 +816,7 @@ suite "parser tests":
 
   test "parse iterator":
     let sample = """
-  iterator myIter(n: int): int
+  iterator myIter(n: int): int =
     var i = 0
     while i < n
       yield i
@@ -1015,7 +1015,7 @@ suite "parser tests":
 
   test "parse for loop with indent body":
     let sample = """
-  for $item in $items:
+  for item in $items:
     color: $item
   """
     var ast: Ast

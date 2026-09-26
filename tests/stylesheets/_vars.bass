@@ -1,4 +1,4 @@
-var $accent* = #0d6efd
-var $radius* = 4px
+var accent* = #0d6efd
+var radius* = 4px
 .base
   color: gray

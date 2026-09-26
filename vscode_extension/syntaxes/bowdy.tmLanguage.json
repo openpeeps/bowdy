@@ -1,0 +1,392 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "bowdy",
+  "scopeName": "source.bowdy",
+  "fileTypes": ["bass"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#interpolation" },
+    { "include": "#at-rule-keyword" },
+    { "include": "#definitions" },
+    { "include": "#control" },
+    { "include": "#mixin-call" },
+    { "include": "#property-line" },
+    { "include": "#selector-block" },
+    { "include": "#keyframe-selector" },
+    { "include": "#selector-parts" },
+    { "include": "#variables" },
+    { "include": "#keywords" },
+    { "include": "#literals" },
+    { "include": "#function-call" },
+    { "include": "#operators" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.documentation.bowdy",
+          "begin": "/\\*\\*",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.block.banner.bowdy",
+          "begin": "/\\*!",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.block.bowdy",
+          "begin": "/\\*",
+          "end": "\\*/"
+        },
+        {
+          "name": "comment.line.double-slash.bowdy",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.bowdy",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            { "include": "#interpolation" },
+            { "name": "constant.character.escape.bowdy", "match": "\\\\." }
+          ]
+        },
+        {
+          "name": "string.quoted.single.bowdy",
+          "begin": "'",
+          "end": "'",
+          "patterns": [
+            { "include": "#interpolation" },
+            { "name": "constant.character.escape.bowdy", "match": "\\\\." }
+          ]
+        },
+        {
+          "name": "string.template.bowdy",
+          "begin": "`",
+          "end": "`",
+          "patterns": [
+            { "include": "#interpolation" },
+            { "name": "constant.character.escape.bowdy", "match": "\\\\." }
+          ]
+        }
+      ]
+    },
+    "interpolation": {
+      "name": "variable.interpolation.bowdy",
+      "begin": "\\$\\{",
+      "end": "\\}",
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#variables" },
+        { "include": "#literals" },
+        { "include": "#operators" }
+      ]
+    },
+    "at-rule-keyword": {
+      "patterns": [
+        {
+          "match": "@(charset|import|namespace|media|supports|layer|font-face|keyframes|font-feature-values|counter-style|property|scope|starting-style|nest|include)\\b",
+          "name": "keyword.control.at-rule.bowdy"
+        }
+      ]
+    },
+    "definitions": {
+      "patterns": [
+        {
+          "match": "\\b(var|const)\\b\\s+([a-zA-Z_][\\w-]*)(\\*)?",
+          "captures": {
+            "1": { "name": "keyword.control.bowdy" },
+            "2": { "name": "variable.other.definition.bowdy" },
+            "3": { "name": "punctuation.definition.export.bowdy" }
+          }
+        },
+        {
+          "match": "\\b(fn|func|function|mixin|iterator)\\b\\s+([a-zA-Z_][\\w-]*)(\\*)?",
+          "captures": {
+            "1": { "name": "keyword.control.bowdy" },
+            "2": { "name": "entity.name.function.bowdy" },
+            "3": { "name": "punctuation.definition.export.bowdy" }
+          }
+        },
+        {
+          "match": "\\b(fn|func|function|mixin|iterator)\\b",
+          "name": "keyword.control.bowdy"
+        }
+      ]
+    },
+    "control": {
+      "patterns": [
+        {
+          "match": "\\b(if|elif|else|for|while|case|of|break|continue|return|echo)\\b",
+          "name": "keyword.control.bowdy"
+        }
+      ]
+    },
+    "mixin-call": {
+      "match": "@[a-zA-Z_][\\w-]*",
+      "name": "entity.name.function.mixin.bowdy"
+    },
+    "property-line": {
+      "patterns": [
+        {
+          "begin": "^\\s*((?:--[\\w-]+|[a-zA-Z-][a-zA-Z0-9-]*))\\s*(:)(?=\\s)",
+          "beginCaptures": {
+            "1": { "name": "support.type.property-name.bowdy" },
+            "2": { "name": "punctuation.separator.key-value.bowdy" }
+          },
+          "end": "(?=;|$|\\})",
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#interpolation" },
+            { "include": "#variables" },
+            { "include": "#function-call" },
+            { "include": "#literals" },
+            { "include": "#keywords" },
+            { "match": "([(),/])", "name": "punctuation.separator.css.bowdy" },
+            { "match": "!important\\b", "name": "keyword.other.important.bowdy" }
+          ]
+        },
+        {
+          "begin": "\\b((?:--[\\w-]+|[a-zA-Z-][a-zA-Z0-9-]*))\\s*(:)\\s*",
+          "beginCaptures": {
+            "1": { "name": "support.type.property-name.bowdy" },
+            "2": { "name": "punctuation.separator.key-value.bowdy" }
+          },
+          "end": "(;|(?=\\})|(?=$))",
+          "endCaptures": {
+            "1": { "name": "punctuation.terminator.rule.bowdy" }
+          },
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#interpolation" },
+            { "include": "#variables" },
+            { "include": "#function-call" },
+            { "include": "#literals" },
+            { "include": "#keywords" },
+            { "match": "([(),/])", "name": "punctuation.separator.css.bowdy" },
+            { "match": "!important\\b", "name": "keyword.other.important.bowdy" }
+          ]
+        }
+      ]
+    },
+    "selector-block": {
+      "patterns": [
+        {
+          "begin": "^\\s*(?=(?:[.#&*:\\[][^{}\\n]*|[a-zA-Z][\\w-]*(?:[.#: \\t\\[\\],>+~][^{}\\n]*)?)\\{)",
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.block.end.bowdy" }
+          },
+          "patterns": [
+            {
+              "begin": "([^{}\\n]+?)(\\{)",
+              "beginCaptures": {
+                "1": { "name": "entity.name.selector.bowdy" },
+                "2": { "name": "punctuation.section.block.begin.bowdy" }
+              },
+              "end": "(?=\\})",
+              "patterns": [
+                { "include": "#comments" },
+                { "include": "#strings" },
+                { "include": "#interpolation" },
+                { "include": "#selector-parts" },
+                { "include": "#variables" },
+                { "include": "#function-call" },
+                { "include": "#literals" }
+              ]
+            },
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#interpolation" },
+            { "include": "#at-rule-keyword" },
+            { "include": "#definitions" },
+            { "include": "#control" },
+            { "include": "#mixin-call" },
+            { "include": "#property-line" },
+            { "include": "#keyframe-selector" },
+            { "include": "#selector-block" },
+            { "include": "#selector-parts" },
+            { "include": "#variables" },
+            { "include": "#keywords" },
+            { "include": "#literals" },
+            { "include": "#function-call" },
+            { "include": "#operators" },
+            { "include": "#punctuation" }
+          ]
+        }
+      ]
+    },
+    "keyframe-selector": {
+      "patterns": [
+        {
+          "match": "^\\s*(from|to)\\b(?=\\s*(,|\\{|$))",
+          "name": "entity.name.selector.keyframe.bowdy"
+        },
+        {
+          "match": "^\\s*\\d+(?:\\.\\d+)?%(?=\\s*(,|\\{|$))",
+          "name": "constant.numeric.keyframe.bowdy"
+        }
+      ]
+    },
+    "selector-parts": {
+      "patterns": [
+        { "include": "#interpolation" },
+        {
+          "match": "#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\\b",
+          "name": "constant.numeric.color.hex.bowdy"
+        },
+        {
+          "match": "\\.[a-zA-Z_][\\w-]*",
+          "name": "entity.other.attribute-name.class.bowdy"
+        },
+        {
+          "match": "#[a-zA-Z_-][\\w-]*",
+          "name": "entity.other.attribute-name.id.bowdy"
+        },
+        {
+          "match": "&",
+          "name": "variable.language.nesting.bowdy"
+        },
+        {
+          "match": "::?[a-zA-Z-]+(?:\\([^)]*\\))?",
+          "name": "entity.other.pseudo-class.bowdy"
+        },
+        {
+          "match": "\\[[^\\]\\n]*\\]",
+          "name": "meta.attribute-selector.bowdy"
+        },
+        {
+          "match": "(?<![\\w-])\\*(?![\\w*])",
+          "name": "entity.name.selector.universal.bowdy"
+        },
+        {
+          "match": "[>+~,]",
+          "name": "punctuation.separator.combinator.bowdy"
+        }
+      ]
+    },
+    "variables": {
+      "patterns": [
+        {
+          "match": "--[\\w-]+",
+          "name": "variable.parameter.custom-property.bowdy"
+        },
+        {
+          "match": "\\$[a-zA-Z_][\\w-]*(?:\\.[a-zA-Z_][\\w-]*)*",
+          "name": "variable.other.bowdy"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "\\b(var|const|fn|func|function|mixin|iterator|return|if|elif|else|for|while|case|of|break|continue|echo|import|in|and|or|not|is|isnot)\\b",
+          "name": "keyword.control.bowdy"
+        },
+        {
+          "match": "\\b(true|false|null|undefined)\\b",
+          "name": "constant.language.bowdy"
+        }
+      ]
+    },
+    "literals": {
+      "patterns": [
+        {
+          "match": "\\b(true|false|null|undefined)\\b",
+          "name": "constant.language.bowdy"
+        },
+        {
+          "match": "!important\\b",
+          "name": "keyword.other.important.bowdy"
+        },
+        {
+          "match": "#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})\\b",
+          "name": "constant.numeric.color.hex.bowdy"
+        },
+        {
+          "match": "\\b\\d+\\.\\d+([eE][+-]?\\d+)?(px|em|rem|%|vh|vw|vmin|vmax|ch|ex|cm|mm|in|pt|pc|s|ms|deg|rad|grad|turn|dpi|dpcm|dppx|Hz|kHz|fr)?\\b",
+          "name": "constant.numeric.float.bowdy"
+        },
+        {
+          "match": "(?<![\\w.])\\.\\d+([eE][+-]?\\d+)?(px|em|rem|%|vh|vw|vmin|vmax|ch|ex|cm|mm|in|pt|pc|s|ms|deg|rad|grad|turn|dpi|dpcm|dppx|Hz|kHz|fr)?\\b",
+          "name": "constant.numeric.float.bowdy"
+        },
+        {
+          "match": "\\b0[xX][0-9a-fA-F]+\\b",
+          "name": "constant.numeric.integer.hexadecimal.bowdy"
+        },
+        {
+          "match": "\\b0[oO][0-7]+\\b",
+          "name": "constant.numeric.integer.octal.bowdy"
+        },
+        {
+          "match": "\\b0[bB][01]+\\b",
+          "name": "constant.numeric.integer.binary.bowdy"
+        },
+        {
+          "match": "-?\\b\\d+([eE][+-]?\\d+)?(px|em|rem|%|vh|vw|vmin|vmax|ch|ex|cm|mm|in|pt|pc|s|ms|deg|rad|grad|turn|dpi|dpcm|dppx|Hz|kHz|fr)?\\b",
+          "name": "constant.numeric.integer.decimal.bowdy"
+        },
+        {
+          "match": "\\b(auto|inherit|initial|unset|none|transparent|currentcolor|revert|revert-layer)\\b",
+          "name": "constant.language.css-keyword.bowdy"
+        }
+      ]
+    },
+    "function-call": {
+      "match": "\\b([a-zA-Z-][a-zA-Z0-9-]*)\\s*(\\()",
+      "captures": {
+        "1": { "name": "support.function.bowdy" },
+        "2": { "name": "punctuation.section.parens.begin.bowdy" }
+      }
+    },
+    "operators": {
+      "patterns": [
+        {
+          "match": "==|!=|<=|>=|&&|\\|\\||\\+=|-=|\\*=|/=|%=|\\$=|\\~=|\\^=|\\|=",
+          "name": "keyword.operator.comparison.bowdy"
+        },
+        {
+          "match": "[+\\-*/%<>=!&|~^]",
+          "name": "keyword.operator.bowdy"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "match": "[{}]",
+          "name": "punctuation.section.block.bowdy"
+        },
+        {
+          "match": "[\\[\\]]",
+          "name": "punctuation.section.brackets.bowdy"
+        },
+        {
+          "match": "[()]",
+          "name": "punctuation.section.parens.bowdy"
+        },
+        {
+          "match": ";",
+          "name": "punctuation.terminator.rule.bowdy"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.bowdy"
+        },
+        {
+          "match": ":",
+          "name": "punctuation.separator.key-value.bowdy"
+        }
+      ]
+    }
+  }
+}
