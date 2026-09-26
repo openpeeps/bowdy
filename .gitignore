@@ -14,3 +14,4 @@ testresults/
 benchmarks/vs_sassc/big.bass
 benchmarks/vs_sassc/big.scss
 benchmarks/dart-sass/
+*.vsix
