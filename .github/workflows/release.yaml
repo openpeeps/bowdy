@@ -9,6 +9,6 @@ jobs:
       contents: write
     uses: nimbase/setup-nim-action/.github/workflows/release_clue.yml@main
     with:
-      os: '[{"os":"ubuntu-latest"},{"os":"macos-15"},{"os":"macos-15-intel"}]'
+      target-matrix: '[{"os":"ubuntu-latest"},{"os":"macos-15"},{"os":"macos-15-intel"}]'
       nim-version: '2.2.10'
       app-name: bowdy
