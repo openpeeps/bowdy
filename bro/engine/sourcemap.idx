@@ -1,9 +1,0 @@
-nimTitle	sourcemap	bro/engine/sourcemap.html	module bro/engine/sourcemap		0
-nim	MapSegment	bro/engine/sourcemap.html#MapSegment	object MapSegment		13
-nim	SourceInfo	bro/engine/sourcemap.html#SourceInfo	object SourceInfo		21
-nim	SourceMap	bro/engine/sourcemap.html#SourceMap	object SourceMap		26
-nim	initSourceInfo	bro/engine/sourcemap.html#initSourceInfo	proc initSourceInfo(): SourceInfo		35
-nim	addSegment	bro/engine/sourcemap.html#addSegment,SourceInfo,int,int,string,int,int	proc addSegment(info: var SourceInfo; genLine, genCol: int; file: string;\n           line, col: int)		38
-nim	addContent	bro/engine/sourcemap.html#addContent,SourceInfo,string,string	proc addContent(info: var SourceInfo; file, content: string)		43
-nim	encode	bro/engine/sourcemap.html#encode,seq[int]	proc encode(values: seq[int]): string		49
-nim	toSourceMap	bro/engine/sourcemap.html#toSourceMap,SourceInfo,string	proc toSourceMap(info: SourceInfo; outputFile: string): SourceMap		73

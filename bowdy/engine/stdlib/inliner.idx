@@ -1,0 +1,7 @@
+nimTitle	inliner	bowdy/engine/stdlib/inliner.html	module bowdy/engine/stdlib/inliner		0
+nim	TempParamDef	bowdy/engine/stdlib/inliner.html#TempParamDef	tuple TempParamDef		6
+nim	addProc	bowdy/engine/stdlib/inliner.html#addProc,Script,Module,string,seq[TempParamDef],TypeKind,ForeignProc	proc addProc(script: Script; module: Module; name: string;\n        params: seq[TempParamDef] = @[]; returnTy: TypeKind;\n        impl: ForeignProc = nil; exportSym = true)		13
+nim	paramDef	bowdy/engine/stdlib/inliner.html#paramDef,string,TypeKind,Value,Sym,bool,bool,string	proc paramDef(name: string; kind: TypeKind; val: Value = nil; sym: Sym = nil;\n         mut, isOpt: bool = false; kindStr = ""): TempParamDef		56
+nim	p	bowdy/engine/stdlib/inliner.html#p,string,TypeKind	proc p(name: string; kind: TypeKind; mut = false; isOpt = false): TempParamDef		62
+nim	compileCode	bowdy/engine/stdlib/inliner.html#compileCode,Script,Module,string,string	proc compileCode(script: Script; module: Module; filename, code: string)		66
+nim	InlineCode	bowdy/engine/stdlib/inliner.html#InlineCode	const InlineCode		85

@@ -1,0 +1,3 @@
+nimTitle	libsystem	bowdy/engine/stdlib/libsystem.html	module bowdy/engine/stdlib/libsystem		0
+nim	TimRuntime	bowdy/engine/stdlib/libsystem.html#TimRuntime	object TimRuntime		21
+nim	loadLibrary	bowdy/engine/stdlib/libsystem.html#loadLibrary,Script,JsonNode,JsonNode	proc loadLibrary(script: Script; globalData, localData: JsonNode): Module		87

@@ -1,3 +1,0 @@
-nimTitle	libsystem	bro/engine/stdlib/libsystem.html	module bro/engine/stdlib/libsystem		0
-nim	TimRuntime	bro/engine/stdlib/libsystem.html#TimRuntime	object TimRuntime		21
-nim	loadLibrary	bro/engine/stdlib/libsystem.html#loadLibrary,Script,JsonNode,JsonNode	proc loadLibrary(script: Script; globalData, localData: JsonNode): Module		87

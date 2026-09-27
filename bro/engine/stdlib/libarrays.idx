@@ -1,2 +1,0 @@
-nimTitle	libarrays	bro/engine/stdlib/libarrays.html	module bro/engine/stdlib/libarrays		0
-nim	initArrays	bro/engine/stdlib/libarrays.html#initArrays,Script,Module	proc initArrays(script: Script; systemModule: Module): Module		15

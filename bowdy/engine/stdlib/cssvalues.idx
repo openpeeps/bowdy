@@ -1,0 +1,13 @@
+nimTitle	cssvalues	bowdy/engine/stdlib/cssvalues.html	module bowdy/engine/stdlib/cssvalues		0
+nim	CssSize	bowdy/engine/stdlib/cssvalues.html#CssSize	object CssSize		21
+nim	CssAngle	bowdy/engine/stdlib/cssvalues.html#CssAngle	object CssAngle		24
+nim	CssTime	bowdy/engine/stdlib/cssvalues.html#CssTime	object CssTime		27
+nim	CssResolution	bowdy/engine/stdlib/cssvalues.html#CssResolution	object CssResolution		30
+nim	CssFlex	bowdy/engine/stdlib/cssvalues.html#CssFlex	object CssFlex		33
+nim	BroColor	bowdy/engine/stdlib/cssvalues.html#BroColor	object BroColor		36
+nim	CssVar	bowdy/engine/stdlib/cssvalues.html#CssVar	object CssVar		39
+nim	CssFunction	bowdy/engine/stdlib/cssvalues.html#CssFunction	object CssFunction		42
+nim	cssNumStr	bowdy/engine/stdlib/cssvalues.html#cssNumStr,float	proc cssNumStr(f: float): string		51
+nim	cssPayloadFreed	bowdy/engine/stdlib/cssvalues.html#cssPayloadFreed	var cssPayloadFreed		56
+nim	cssPayloadMade	bowdy/engine/stdlib/cssvalues.html#cssPayloadMade	var cssPayloadMade		58
+nim	initCssPayload	bowdy/engine/stdlib/cssvalues.html#initCssPayload,TypeId,T,string	proc initCssPayload[T: object](id: TypeId; payload: T; display: string): Value		70

@@ -1,0 +1,17 @@
+nimTitle	jitbridge	bowdy/engine/jitbridge.html	module bowdy/engine/jitbridge		0
+nim	broJitPushConst	bowdy/engine/jitbridge.html#broJitPushConst,pointer	proc broJitPushConst(namePtr: pointer): int64		32
+nim	broJitPushFloat	bowdy/engine/jitbridge.html#broJitPushFloat,pointer	proc broJitPushFloat(namePtr: pointer): int64		38
+nim	broJitPushG	bowdy/engine/jitbridge.html#broJitPushG,pointer	proc broJitPushG(namePtr: pointer): int64		43
+nim	broJitPopG	bowdy/engine/jitbridge.html#broJitPopG,pointer,int64	proc broJitPopG(namePtr: pointer; slot: int64)		48
+nim	broJitConcatStr	bowdy/engine/jitbridge.html#broJitConcatStr,int64,int64	proc broJitConcatStr(a, b: int64): int64		56
+nim	broJitConstrArray	bowdy/engine/jitbridge.html#broJitConstrArray,int32,ptr.UncheckedArray[int64],int32,pointer	proc broJitConstrArray(metaId: int32; flatArgs: ptr UncheckedArray[int64];\n                  argc: int32; argTypes: pointer): int64		70
+nim	broJitConstrObj	bowdy/engine/jitbridge.html#broJitConstrObj,int32,ptr.UncheckedArray[int64],int32,pointer	proc broJitConstrObj(metaId: int32; flatArgs: ptr UncheckedArray[int64]; argc: int32;\n                argTypes: pointer): int64		80
+nim	broJitEmitRaw	bowdy/engine/jitbridge.html#broJitEmitRaw,int32,ptr.UncheckedArray[int64],int32,pointer	proc broJitEmitRaw(metaId: int32; flatArgs: ptr UncheckedArray[int64]; argc: int32;\n              argTypes: pointer): int64		95
+nim	broJitEmitCSS	bowdy/engine/jitbridge.html#broJitEmitCSS,int32,ptr.UncheckedArray[int64],int32,pointer	proc broJitEmitCSS(metaId: int32; flatArgs: ptr UncheckedArray[int64]; argc: int32;\n              argTypes: pointer): int64		107
+nim	cssDisplayText	bowdy/engine/jitbridge.html#cssDisplayText,Value	proc cssDisplayText(v: Value): string		123
+nim	broFastCssStr	bowdy/engine/jitbridge.html#broFastCssStr,int32,ptr.UncheckedArray[int64],int32,pointer	proc broFastCssStr(procId: int32; flatArgs: ptr UncheckedArray[int64]; argc: int32;\n              argTypes: pointer): int64		150
+nim	broFastCssJoin	bowdy/engine/jitbridge.html#broFastCssJoin,int32,ptr.UncheckedArray[int64],int32,pointer	proc broFastCssJoin(procId: int32; flatArgs: ptr UncheckedArray[int64]; argc: int32;\n               argTypes: pointer): int64		156
+nim	broFastVar1	bowdy/engine/jitbridge.html#broFastVar1,int32,ptr.UncheckedArray[int64],int32,pointer	proc broFastVar1(procId: int32; flatArgs: ptr UncheckedArray[int64]; argc: int32;\n            argTypes: pointer): int64		166
+nim	broFastVar2	bowdy/engine/jitbridge.html#broFastVar2,int32,ptr.UncheckedArray[int64],int32,pointer	proc broFastVar2(procId: int32; flatArgs: ptr UncheckedArray[int64]; argc: int32;\n            argTypes: pointer): int64		177
+nim	broJitGetOutput	bowdy/engine/jitbridge.html#broJitGetOutput,pointer	proc broJitGetOutput(vmPtr: pointer): Value		188
+nim	initBroJit	bowdy/engine/jitbridge.html#initBroJit,Vm	proc initBroJit(vm: Vm)		196

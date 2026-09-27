@@ -1,0 +1,8 @@
+nimTitle	libcolors	bowdy/engine/stdlib/libcolors.html	module bowdy/engine/stdlib/libcolors		0
+nim	tyColor	bowdy/engine/stdlib/libcolors.html#tyColor	const tyColor		14
+nim	canonicalColorRaw	bowdy/engine/stdlib/libcolors.html#canonicalColorRaw,Color,string	proc canonicalColorRaw(col: Color; raw: string): string		25
+nim	newBroColor	bowdy/engine/stdlib/libcolors.html#newBroColor,Color,string	proc newBroColor(col: Color; raw: string = ""): Value		51
+nim	resolveColor	bowdy/engine/stdlib/libcolors.html#resolveColor,Value	proc resolveColor(v: Value): Color		57
+nim	resolveBroColor	bowdy/engine/stdlib/libcolors.html#resolveBroColor,Value	proc resolveBroColor(v: Value): BroColor		62
+nim	broColorToString	bowdy/engine/stdlib/libcolors.html#broColorToString,Value	proc broColorToString(v: Value): string		67
+nim	initColors	bowdy/engine/stdlib/libcolors.html#initColors,Script,Module	proc initColors(script: Script; systemModule: Module): Module		70

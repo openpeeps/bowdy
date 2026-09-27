@@ -1,0 +1,9 @@
+nimTitle	sourcemap	bowdy/engine/sourcemap.html	module bowdy/engine/sourcemap		0
+nim	MapSegment	bowdy/engine/sourcemap.html#MapSegment	object MapSegment		13
+nim	SourceInfo	bowdy/engine/sourcemap.html#SourceInfo	object SourceInfo		21
+nim	SourceMap	bowdy/engine/sourcemap.html#SourceMap	object SourceMap		26
+nim	initSourceInfo	bowdy/engine/sourcemap.html#initSourceInfo	proc initSourceInfo(): SourceInfo		35
+nim	addSegment	bowdy/engine/sourcemap.html#addSegment,SourceInfo,int,int,string,int,int	proc addSegment(info: var SourceInfo; genLine, genCol: int; file: string;\n           line, col: int)		38
+nim	addContent	bowdy/engine/sourcemap.html#addContent,SourceInfo,string,string	proc addContent(info: var SourceInfo; file, content: string)		43
+nim	encode	bowdy/engine/sourcemap.html#encode,seq[int]	proc encode(values: seq[int]): string		49
+nim	toSourceMap	bowdy/engine/sourcemap.html#toSourceMap,SourceInfo,string	proc toSourceMap(info: SourceInfo; outputFile: string): SourceMap		73

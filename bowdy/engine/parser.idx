@@ -1,0 +1,19 @@
+nimTitle	parser	bowdy/engine/parser.html	module bowdy/engine/parser		0
+nim	isKnownCssProperty	bowdy/engine/parser.html#isKnownCssProperty,string	proc isKnownCssProperty(name: string): bool		15
+nim	Parser	bowdy/engine/parser.html#Parser	object Parser		19
+nim	BroParserError	bowdy/engine/parser.html#BroParserError	object BroParserError		32
+nim	PrefixFunction	bowdy/engine/parser.html#PrefixFunction	type PrefixFunction		115
+nim	isBareDefName	bowdy/engine/parser.html#isBareDefName,string	proc isBareDefName(name: string): bool		342
+nim	normVarName	bowdy/engine/parser.html#normVarName,string	proc normVarName(name: string): string		358
+nim	normVarNode	bowdy/engine/parser.html#normVarNode,Node	proc normVarNode(node: Node): Node		367
+nim	colorCtorFns	bowdy/engine/parser.html#colorCtorFns	const colorCtorFns		378
+nim	cssStaticRawColorFns	bowdy/engine/parser.html#cssStaticRawColorFns	const cssStaticRawColorFns		523
+nim	broValueFnNames	bowdy/engine/parser.html#broValueFnNames	const broValueFnNames		531
+nim	cssFnBareKeywords	bowdy/engine/parser.html#cssFnBareKeywords	const cssFnBareKeywords		555
+nim	cssFnNames	bowdy/engine/parser.html#cssFnNames	const cssFnNames		565
+nim	cssFnSlashAlpha	bowdy/engine/parser.html#cssFnSlashAlpha	const cssFnSlashAlpha		580
+nim	cssFnOpaqueNested	bowdy/engine/parser.html#cssFnOpaqueNested	const cssFnOpaqueNested		586
+nim	unitSizeSuffixes	bowdy/engine/parser.html#unitSizeSuffixes	const unitSizeSuffixes		826
+nim	parseScript	bowdy/engine/parser.html#parseScript,Ast,sinkstring,string	proc parseScript(astProgram: var Ast; code: sink string; sourcePath: string)		3197
+nim	errorContextFor	bowdy/engine/parser.html#errorContextFor,string,int,int	proc errorContextFor(filePath: string; ln, col: int): string		3206
+nim	parseScriptFile	bowdy/engine/parser.html#parseScriptFile,Ast,string	proc parseScriptFile(astProgram: var Ast; path: string)		3224

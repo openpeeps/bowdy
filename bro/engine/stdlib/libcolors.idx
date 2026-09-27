@@ -1,7 +1,0 @@
-nimTitle	libcolors	bro/engine/stdlib/libcolors.html	module bro/engine/stdlib/libcolors		0
-nim	tyColor	bro/engine/stdlib/libcolors.html#tyColor	const tyColor		14
-nim	newBroColor	bro/engine/stdlib/libcolors.html#newBroColor,Color,string	proc newBroColor(col: Color; raw: string = ""): Value		22
-nim	resolveColor	bro/engine/stdlib/libcolors.html#resolveColor,Value	proc resolveColor(v: Value): Color		28
-nim	resolveBroColor	bro/engine/stdlib/libcolors.html#resolveBroColor,Value	proc resolveBroColor(v: Value): BroColor		33
-nim	broColorToString	bro/engine/stdlib/libcolors.html#broColorToString,Value	proc broColorToString(v: Value): string		38
-nim	initColors	bro/engine/stdlib/libcolors.html#initColors,Script,Module	proc initColors(script: Script; systemModule: Module): Module		41

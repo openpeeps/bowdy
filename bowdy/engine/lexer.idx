@@ -1,0 +1,98 @@
+nimTitle	lexer	bowdy/engine/lexer.html	module bowdy/engine/lexer		0
+nim	tkUnknown	bowdy/engine/lexer.html#tkUnknown	TokenKind.tkUnknown		12
+nim	tkEOF	bowdy/engine/lexer.html#tkEOF	TokenKind.tkEOF		12
+nim	tkIdentifier	bowdy/engine/lexer.html#tkIdentifier	TokenKind.tkIdentifier		12
+nim	tkCssVar	bowdy/engine/lexer.html#tkCssVar	TokenKind.tkCssVar		12
+nim	tkInt	bowdy/engine/lexer.html#tkInt	TokenKind.tkInt		12
+nim	tkFloat	bowdy/engine/lexer.html#tkFloat	TokenKind.tkFloat		12
+nim	tkUnit	bowdy/engine/lexer.html#tkUnit	TokenKind.tkUnit		12
+nim	tkString	bowdy/engine/lexer.html#tkString	TokenKind.tkString		12
+nim	tkSemicolon	bowdy/engine/lexer.html#tkSemicolon	TokenKind.tkSemicolon		12
+nim	tkColon	bowdy/engine/lexer.html#tkColon	TokenKind.tkColon		12
+nim	tkComma	bowdy/engine/lexer.html#tkComma	TokenKind.tkComma		12
+nim	tkDot	bowdy/engine/lexer.html#tkDot	TokenKind.tkDot		12
+nim	tkHash	bowdy/engine/lexer.html#tkHash	TokenKind.tkHash		12
+nim	tkLParen	bowdy/engine/lexer.html#tkLParen	TokenKind.tkLParen		12
+nim	tkRParen	bowdy/engine/lexer.html#tkRParen	TokenKind.tkRParen		12
+nim	tkLBrace	bowdy/engine/lexer.html#tkLBrace	TokenKind.tkLBrace		12
+nim	tkRBrace	bowdy/engine/lexer.html#tkRBrace	TokenKind.tkRBrace		12
+nim	tkLBracket	bowdy/engine/lexer.html#tkLBracket	TokenKind.tkLBracket		12
+nim	tkRBracket	bowdy/engine/lexer.html#tkRBracket	TokenKind.tkRBracket		12
+nim	tkPlus	bowdy/engine/lexer.html#tkPlus	TokenKind.tkPlus		12
+nim	tkMinus	bowdy/engine/lexer.html#tkMinus	TokenKind.tkMinus		12
+nim	tkAsterisk	bowdy/engine/lexer.html#tkAsterisk	TokenKind.tkAsterisk		12
+nim	tkDivide	bowdy/engine/lexer.html#tkDivide	TokenKind.tkDivide		12
+nim	tkPercent	bowdy/engine/lexer.html#tkPercent	TokenKind.tkPercent		12
+nim	tkEqual	bowdy/engine/lexer.html#tkEqual	TokenKind.tkEqual		12
+nim	tkDoubleEqual	bowdy/engine/lexer.html#tkDoubleEqual	TokenKind.tkDoubleEqual		12
+nim	tkNotEqual	bowdy/engine/lexer.html#tkNotEqual	TokenKind.tkNotEqual		12
+nim	tkLT	bowdy/engine/lexer.html#tkLT	TokenKind.tkLT		12
+nim	tkLTE	bowdy/engine/lexer.html#tkLTE	TokenKind.tkLTE		12
+nim	tkGT	bowdy/engine/lexer.html#tkGT	TokenKind.tkGT		12
+nim	tkGTE	bowdy/engine/lexer.html#tkGTE	TokenKind.tkGTE		12
+nim	tkAmp	bowdy/engine/lexer.html#tkAmp	TokenKind.tkAmp		12
+nim	tkAndAnd	bowdy/engine/lexer.html#tkAndAnd	TokenKind.tkAndAnd		12
+nim	tkOrOr	bowdy/engine/lexer.html#tkOrOr	TokenKind.tkOrOr		12
+nim	tkOr	bowdy/engine/lexer.html#tkOr	TokenKind.tkOr		12
+nim	tkKeywordIs	bowdy/engine/lexer.html#tkKeywordIs	TokenKind.tkKeywordIs		12
+nim	tkKeywordIsnot	bowdy/engine/lexer.html#tkKeywordIsnot	TokenKind.tkKeywordIsnot		12
+nim	tkAnd	bowdy/engine/lexer.html#tkAnd	TokenKind.tkAnd		12
+nim	tkKeywordNot	bowdy/engine/lexer.html#tkKeywordNot	TokenKind.tkKeywordNot		12
+nim	tkBacktick	bowdy/engine/lexer.html#tkBacktick	TokenKind.tkBacktick		12
+nim	tkAt	bowdy/engine/lexer.html#tkAt	TokenKind.tkAt		12
+nim	tkAssign	bowdy/engine/lexer.html#tkAssign	TokenKind.tkAssign		12
+nim	tkPlusAssign	bowdy/engine/lexer.html#tkPlusAssign	TokenKind.tkPlusAssign		12
+nim	tkMinusAssign	bowdy/engine/lexer.html#tkMinusAssign	TokenKind.tkMinusAssign		12
+nim	tkAsteriskAssign	bowdy/engine/lexer.html#tkAsteriskAssign	TokenKind.tkAsteriskAssign		12
+nim	tkSlashAssign	bowdy/engine/lexer.html#tkSlashAssign	TokenKind.tkSlashAssign		12
+nim	tkPercentAssign	bowdy/engine/lexer.html#tkPercentAssign	TokenKind.tkPercentAssign		12
+nim	tkBang	bowdy/engine/lexer.html#tkBang	TokenKind.tkBang		12
+nim	tkTilde	bowdy/engine/lexer.html#tkTilde	TokenKind.tkTilde		12
+nim	tkTildeAssign	bowdy/engine/lexer.html#tkTildeAssign	TokenKind.tkTildeAssign		12
+nim	tkCaret	bowdy/engine/lexer.html#tkCaret	TokenKind.tkCaret		12
+nim	tkCaretAssign	bowdy/engine/lexer.html#tkCaretAssign	TokenKind.tkCaretAssign		12
+nim	tkPipeAssign	bowdy/engine/lexer.html#tkPipeAssign	TokenKind.tkPipeAssign		12
+nim	tkDollarAssign	bowdy/engine/lexer.html#tkDollarAssign	TokenKind.tkDollarAssign		12
+nim	tkKeywordVar	bowdy/engine/lexer.html#tkKeywordVar	TokenKind.tkKeywordVar		12
+nim	tkKeywordConst	bowdy/engine/lexer.html#tkKeywordConst	TokenKind.tkKeywordConst		12
+nim	tkKeywordFunction	bowdy/engine/lexer.html#tkKeywordFunction	TokenKind.tkKeywordFunction		12
+nim	tkKeywordReturn	bowdy/engine/lexer.html#tkKeywordReturn	TokenKind.tkKeywordReturn		12
+nim	tkKeywordIf	bowdy/engine/lexer.html#tkKeywordIf	TokenKind.tkKeywordIf		12
+nim	tkKeywordElse	bowdy/engine/lexer.html#tkKeywordElse	TokenKind.tkKeywordElse		12
+nim	tkKeywordElif	bowdy/engine/lexer.html#tkKeywordElif	TokenKind.tkKeywordElif		12
+nim	tkKeywordWhile	bowdy/engine/lexer.html#tkKeywordWhile	TokenKind.tkKeywordWhile		12
+nim	tkKeywordFor	bowdy/engine/lexer.html#tkKeywordFor	TokenKind.tkKeywordFor		12
+nim	tkKeywordIn	bowdy/engine/lexer.html#tkKeywordIn	TokenKind.tkKeywordIn		12
+nim	tkKeywordOf	bowdy/engine/lexer.html#tkKeywordOf	TokenKind.tkKeywordOf		12
+nim	tkKeywordCase	bowdy/engine/lexer.html#tkKeywordCase	TokenKind.tkKeywordCase		12
+nim	tkKeywordBreak	bowdy/engine/lexer.html#tkKeywordBreak	TokenKind.tkKeywordBreak		12
+nim	tkKeywordContinue	bowdy/engine/lexer.html#tkKeywordContinue	TokenKind.tkKeywordContinue		12
+nim	tkKeywordEcho	bowdy/engine/lexer.html#tkKeywordEcho	TokenKind.tkKeywordEcho		12
+nim	tkKeywordTrue	bowdy/engine/lexer.html#tkKeywordTrue	TokenKind.tkKeywordTrue		12
+nim	tkKeywordFalse	bowdy/engine/lexer.html#tkKeywordFalse	TokenKind.tkKeywordFalse		12
+nim	tkKeywordNull	bowdy/engine/lexer.html#tkKeywordNull	TokenKind.tkKeywordNull		12
+nim	tkKeywordUndefined	bowdy/engine/lexer.html#tkKeywordUndefined	TokenKind.tkKeywordUndefined		12
+nim	tkKeywordImport	bowdy/engine/lexer.html#tkKeywordImport	TokenKind.tkKeywordImport		12
+nim	tkKeywordIterator	bowdy/engine/lexer.html#tkKeywordIterator	TokenKind.tkKeywordIterator		12
+nim	tkKeywordMixin	bowdy/engine/lexer.html#tkKeywordMixin	TokenKind.tkKeywordMixin		12
+nim	tkComment	bowdy/engine/lexer.html#tkComment	TokenKind.tkComment		12
+nim	tkDocBlock	bowdy/engine/lexer.html#tkDocBlock	TokenKind.tkDocBlock		12
+nim	tkDocBlockBang	bowdy/engine/lexer.html#tkDocBlockBang	TokenKind.tkDocBlockBang		12
+nim	TokenKind	bowdy/engine/lexer.html#TokenKind	enum TokenKind		12
+nim	TokenTuple	bowdy/engine/lexer.html#TokenTuple	tuple TokenTuple		95
+nim	Lexer	bowdy/engine/lexer.html#Lexer	object Lexer		103
+nim	charAt	bowdy/engine/lexer.html#charAt,Lexer,int	proc charAt(lex: Lexer; idx: int): char		113
+nim	newLexer	bowdy/engine/lexer.html#newLexer,string	proc newLexer(input: string): Lexer		119
+nim	newLexer	bowdy/engine/lexer.html#newLexer,pointer,int	proc newLexer(mem: pointer; size: int): Lexer		131
+nim	sliceText	bowdy/engine/lexer.html#sliceText,Lexer,int,int	proc sliceText(lex: Lexer; startPos, stopPos: int): string		143
+nim	lexeme	bowdy/engine/lexer.html#lexeme,Lexer,int,int	proc lexeme(lex: Lexer; startPos, endPos: int): string		152
+nim	errorContext	bowdy/engine/lexer.html#errorContext,Lexer,int,int	proc errorContext(lex: Lexer; posOverride = -1; maxContext = 80): string		157
+nim	peek	bowdy/engine/lexer.html#peek,Lexer,int	proc peek(lex: Lexer; offset = 1): char		198
+nim	skipWhitespace	bowdy/engine/lexer.html#skipWhitespace,Lexer	proc skipWhitespace(lex: var Lexer)		201
+nim	initToken	bowdy/engine/lexer.html#initToken,Lexer,staticTokenKind,int,int,int,int	proc initToken(lex: var Lexer; kind: static TokenKind; line, col, pos, wsno: int): TokenTuple		205
+nim	initToken	bowdy/engine/lexer.html#initToken,Lexer,sinkstring,TokenKind,int,int,int,int	proc initToken(lex: var Lexer; value: sink string; kind: TokenKind;\n          line, col, pos, wsno: int): TokenTuple		208
+nim	initToken	bowdy/engine/lexer.html#initToken,Lexer,staticTokenKind	proc initToken(lex: var Lexer; kind: static TokenKind): TokenTuple		211
+nim	getToken	bowdy/engine/lexer.html#getToken,Lexer	proc getToken(lex: var Lexer): TokenTuple		665
+nim	getTokens	bowdy/engine/lexer.html#getTokens,Lexer,openArray[TokenTuple]	proc getTokens(lex: var Lexer; buf: var openArray[TokenTuple]): int		669
+nimgrp	inittoken	bowdy/engine/lexer.html#initToken-procs-all	proc		205
+nimgrp	newlexer	bowdy/engine/lexer.html#newLexer-procs-all	proc		119

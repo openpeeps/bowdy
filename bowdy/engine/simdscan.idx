@@ -1,0 +1,8 @@
+nimTitle	simdscan	bowdy/engine/simdscan.html	module bowdy/engine/simdscan		0
+nim	simdBackend	bowdy/engine/simdscan.html#simdBackend	const simdBackend		24
+nim	scanSpaces	bowdy/engine/simdscan.html#scanSpaces,ptr.UncheckedArray[char],int,int	proc scanSpaces(p: ptr UncheckedArray[char]; pos, stop: int): int		288
+nim	scanDigits	bowdy/engine/simdscan.html#scanDigits,ptr.UncheckedArray[char],int,int	proc scanDigits(p: ptr UncheckedArray[char]; pos, stop: int): int		295
+nim	scanIdentTail	bowdy/engine/simdscan.html#scanIdentTail,ptr.UncheckedArray[char],int,int	proc scanIdentTail(p: ptr UncheckedArray[char]; pos, stop: int): int		301
+nim	scanUnitTail	bowdy/engine/simdscan.html#scanUnitTail,ptr.UncheckedArray[char],int,int	proc scanUnitTail(p: ptr UncheckedArray[char]; pos, stop: int): int		307
+nim	offsetUntilByte	bowdy/engine/simdscan.html#offsetUntilByte,ptr.UncheckedArray[char],int,int,char	proc offsetUntilByte(p: ptr UncheckedArray[char]; pos, stop: int; b: char): int		313
+nim	offsetUntilEither	bowdy/engine/simdscan.html#offsetUntilEither,ptr.UncheckedArray[char],int,int,char,char	proc offsetUntilEither(p: ptr UncheckedArray[char]; pos, stop: int; b1, b2: char): int		320
