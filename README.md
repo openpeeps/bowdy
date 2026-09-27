@@ -23,7 +23,7 @@ BASS files use the `.bass` extension and compile to `.css`.
 
 ## Features
 
-- Fast stack-based VM & JIT Compiler
+- Fast stack-based VM
 - Typed system for CSS values (`color`, `length`, `number`, etc.) with compile-time checks
 - Familiar CSS syntax with indentation or brace blocks
 - Variables (`var`, `const`) with optional type annotations and export (`*`)
