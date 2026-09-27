@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://github.com/openpeeps/bowdy/blob/main/.github/logo.png" alt="bowdy" width="170px"><br>
   bowdy &bullet; A fast CSS Preprocessor<br>
-  Typed &bullet; VM & JIT Compiler &bullet; Written in Nim language 
+  Standalone CLI &bullet; Typed &bullet; Stack-based VM &bullet; Written in Nim language 
 </p>
 
 <p align="center">
