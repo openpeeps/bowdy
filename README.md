@@ -33,6 +33,7 @@ BASS files use the `.bass` extension and compile to `.css`.
 - Module imports (`import "./vars.bass"`) and package imports (`pkg/`)
 - Modern CSS passthrough: custom properties, `var()`, `calc()`, `color-mix()`, gradients, and at-rules
 - Source maps, bundling, and pretty-printed output
+- VS Code Extension [Available on Marketplace](https://marketplace.visualstudio.com/items?itemName=OpenPeeps.bowdycss)
 
 ## Quick Start
 
@@ -47,6 +48,23 @@ nimble install bowdy
 Or use [clue](https://github.com/openpeeps/clue), an alternative package manager for Nim development:
 ```sh
 clue install bowdy --build
+```
+
+### Usage
+```
+CSS preprocessor alternative to SassC/DartSass
+  (c) George Lemon | LGPL-3.0-or-later License  
+  Build Version: 0.3.0
+
+  c <input:path>            Compile BASS to CSS with optional source map
+               -o:filename
+                   -w:bool
+          --sourceMap:bool
+             --pretty:bool
+             --strict:bool
+           --warnings:bool
+  ast <input:path>          Generate binary AST from BASS/CSS
+          -o:filename
 ```
 
 ### Compile
