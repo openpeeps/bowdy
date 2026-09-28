@@ -1,7 +1,7 @@
 <p align="center">
   <img src="https://github.com/openpeeps/bowdy/blob/main/.github/logo.png" alt="bowdy" width="170px"><br>
   bowdy &bullet; A fast CSS Preprocessor<br>
-  Typed &bullet; VM & JIT Compiler &bullet; Written in Nim language 
+  Standalone CLI &bullet; Typed &bullet; Stack-based VM &bullet; Written in Nim language 
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@ BASS files use the `.bass` extension and compile to `.css`.
 
 ## Features
 
-- Fast stack-based VM & JIT Compiler
+- Fast stack-based VM
 - Typed system for CSS values (`color`, `length`, `number`, etc.) with compile-time checks
 - Familiar CSS syntax with indentation or brace blocks
 - Variables (`var`, `const`) with optional type annotations and export (`*`)
