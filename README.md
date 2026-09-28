@@ -102,8 +102,10 @@ var radius = 4px
 ```css
 .card{color:#0d6efd;border-radius:4px}
 ```
-Variables use `var` / `const`, support interpolation (`$primary`), and are checked against CSS property types — the compiler rejects mismatches such as `width: red`. Definitions are always bare (`var primary = ...`); `$primary` or `_primary` at definition is a parse error, and use sites always require the `$` prefix.
-CSS custom properties take part in the same system: `var(--x)` parses as a real call returning a typed `cssvar` value, so custom-property names stay atomic (`var(--color-gray-100)` is never re-split) and use sites check structurally. Every `--x` declaration (entry file and imports, order-independent) registers its inferred type, so under `--strict` `color: var(--fs-medium)` is a hard error when `--fs-medium` holds a size. Undeclared names only warn (they may come from plain-CSS imports or JS), `var(--x, fallback)` validates the fallback too, and `env()` is left alone. The CLI collects warnings during a compile and prints them with `displayWarning` once the CSS is out.
+Variables use `var` / `const`, support interpolation (`$primary`), and are checked against CSS property types. The compiler rejects mismatches such as `width: red`. Definitions are always bare (`var primary = ...`); `$primary` or `_primary` at definition is a parse error, and use sites always require the `$` prefix.
+CSS custom properties take part in the same system: `var(--x)` parses as a real call returning a typed `cssvar` value, so custom-property names stay atomic (`var(--color-gray-100)` is never re-split) and use sites check structurally. Every `--x` declaration (entry file and imports, order-independent) registers its inferred type, so under `--strict` `color: var(--fs-medium)` is a hard error when `--fs-medium` holds a size.
+
+Undeclared names only warn (they may come from plain-CSS imports or JS), `var(--x, fallback)` validates the fallback too, and `env()` is left alone. The CLI collects warnings during a compile and prints them with `displayWarning` once the CSS is out.
 
 ### 2. Nesting
 
