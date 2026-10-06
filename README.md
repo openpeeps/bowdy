@@ -243,23 +243,20 @@ Suites (reports land in `bin/bench-a.md`, `bin/bench-b.md`, `bin/bench-c.md`):
 Re-run on your own machine before quoting numbers: absolute times depend
 on hardware and build flags (release).
 
-Known fixture constraints: `$vars` inside opaque raw CSS calls
-(`linear-gradient(to right, $c, ...)`) stay verbatim, runtime `${$var}px`
-interpolation needs a loop or literal base, and construct ordering in
-`features.bass` is load-bearing in spots. `#` is not a comment in BASS (it
-starts an ID selector); the `.bass` fixture uses `//` comments.
-Typed `var()` approximations: the registry is file-global (selector and
-media scoping ignored, last declaration wins), shorthand syntaxes stay
-narrow (`border: var(--w)` with a length errors, same as `border: $w`
-today), and `var()` text smuggled through `$var` strings (rather than a
-real `var()` call) is unchecked. Uppercase `VAR()` stays opaque and
-unvalidated.
-Static color calls keep their source spelling: fully-static `rgb()` /
-`rgba()` / `hsl()`-family calls render verbatim (`rgb(13 110 253)` stays
-space-separated, `rgba(0,0,0,.3)` keeps `,` and `.3`), while dynamic
-forms (any `$var` / `var()` / nested call) evaluate to typed colors and
-render canonically. Static calls nested in `var()` fallbacks stringify
-compactly (`translate3d(0.25em,0,0)`).
+Known fixture constraints:
+- `$vars` inside opaque raw CSS calls (`linear-gradient(to right, $c, ...)`) stay verbatim
+- runtime `${$var}px` interpolation needs a loop or literal base
+- construct ordering in `features.bass` is load-bearing in spots
+- `#` is not a comment in BASS (it starts an ID selector); the `.bass` fixture uses `//` comments
+- typed `var()` approximations:
+  - registry is file-global (selector and media scoping ignored, last declaration wins)
+  - shorthand syntaxes stay narrow (`border: var(--w)` with a length errors, same as `border: $w` today)
+  - `var()` text smuggled through `$var` strings (rather than a real `var()` call) is unchecked
+  - uppercase `VAR()` stays opaque and unvalidated
+- static color calls keep their source spelling:
+  - fully-static `rgb()` / `rgba()` / `hsl()`-family calls render verbatim (`rgb(13 110 253)` stays space-separated, `rgba(0,0,0,.3)` keeps `,` and `.3`)
+  - dynamic forms (any `$var` / `var()` / nested call) evaluate to typed colors and render canonically
+  - static calls nested in `var()` fallbacks stringify compactly (`translate3d(0.25em,0,0)`)
 
 ## Documentation
 
