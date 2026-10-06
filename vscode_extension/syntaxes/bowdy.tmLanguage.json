@@ -107,6 +107,24 @@
           }
         },
         {
+          "begin": "\\b(fn|func|function|mixin|iterator)\\b\\s*(?:([a-zA-Z_][\\w-]*)(\\*)?\\s*)?(\\()",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.bowdy" },
+            "2": { "name": "entity.name.function.bowdy" },
+            "3": { "name": "punctuation.definition.export.bowdy" },
+            "4": { "name": "punctuation.section.parens.begin.bowdy" }
+          },
+          "end": "(\\))((\\s*)(:)(\\s*)([a-zA-Z_][\\w-]*))?",
+          "endCaptures": {
+            "1": { "name": "punctuation.section.parens.end.bowdy" },
+            "4": { "name": "punctuation.separator.type.bowdy" },
+            "6": { "name": "storage.type.bowdy" }
+          },
+          "patterns": [
+            { "include": "#function-params" }
+          ]
+        },
+        {
           "match": "\\b(fn|func|function|mixin|iterator)\\b\\s+([a-zA-Z_][\\w-]*)(\\*)?",
           "captures": {
             "1": { "name": "keyword.control.bowdy" },
@@ -117,6 +135,62 @@
         {
           "match": "\\b(fn|func|function|mixin|iterator)\\b",
           "name": "keyword.control.bowdy"
+        }
+      ]
+    },
+    "function-params": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#variables" },
+        { "include": "#literals" },
+        { "include": "#function-call" },
+        {
+          "begin": "\\(",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.parens.begin.bowdy" }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.parens.end.bowdy" }
+          },
+          "patterns": [
+            { "include": "#comments" },
+            { "include": "#strings" },
+            { "include": "#variables" },
+            { "include": "#literals" },
+            { "include": "#function-call" },
+            { "include": "#operators" },
+            { "match": ",", "name": "punctuation.separator.comma.bowdy" }
+          ]
+        },
+        {
+          "match": "(:)\\s*(var)\\b\\s*([a-zA-Z_][\\w-]*)",
+          "captures": {
+            "1": { "name": "punctuation.separator.type.bowdy" },
+            "2": { "name": "storage.type.bowdy" },
+            "3": { "name": "storage.type.bowdy" }
+          }
+        },
+        {
+          "match": "([a-zA-Z_][\\w-]*)\\s*(:)\\s*((?!var\\b)[a-zA-Z_][\\w-]*)",
+          "captures": {
+            "1": { "name": "variable.parameter.bowdy" },
+            "2": { "name": "punctuation.separator.type.bowdy" },
+            "3": { "name": "storage.type.bowdy" }
+          }
+        },
+        {
+          "match": "\\b[a-zA-Z_][\\w-]*\\b",
+          "name": "variable.parameter.bowdy"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.bowdy"
+        },
+        {
+          "match": "=",
+          "name": "keyword.operator.assignment.bowdy"
         }
       ]
     },
