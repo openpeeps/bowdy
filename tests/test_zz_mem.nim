@@ -19,15 +19,14 @@ suite "mem harness (temporary)":
     let iters =
       try: parseInt(getEnv("MEM_ITERS", "20"))
       except: 20
-    let useJit = getEnv("MEM_JIT", "0") == "1"
     let file = getEnv("MEM_FILE", "")
     var allOk = true
     for i in 1..iters:
       let r =
-        if file.len > 0: compileStylesheetFile(file, jit = useJit)
-        else: compileStylesheet(sample, jit = useJit)
+        if file.len > 0: compileStylesheetFile(file)
+        else: compileStylesheet(sample)
       allOk = allOk and r.ok
-      echo "iter=" & $i & " jit=" & $useJit &
+      echo "iter=" & $i &
         " occupied=" & $getOccupiedMem() &
         " total=" & $getTotalMem()
     check allOk

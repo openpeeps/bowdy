@@ -3,11 +3,8 @@ import std/[options, os, tables]
 import pkg/openparser/json
 import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value,
   resolver]
-import pkg/vancode/interpreter/jit/jit
-import pkg/vancode/interpreter/jit/compiler_bridge
 import bowdy/engine/parser
 import bowdy/engine/stdlib/[libsystem, libarrays, libcolors, libcss, cssvalues]
-import bowdy/engine/jitbridge
 import unittest
 
 const sampleFull = """:root
@@ -50,33 +47,13 @@ proc oneIter(program: Ast): string =
   gen.genScript(program, none(string))
   mem("  post-codegen")
   if reusedVm == nil or getEnv("MEM_REUSEVM", "0") != "1":
-    reusedVm = newVirtualMachine(VMPreferences(
-      enableHotCodeDetection: true,
-      hotProcThreshold: 10,
-      hotChunkThreshold: 1
-    ))
+    reusedVm = newVirtualMachine(VMPreferences())
   let virtualMachine = reusedVm
-  if getEnv("MEM_NOJIT", "0") != "1":
-    resetJitState()
-    mem("  post-reset")
-    virtualMachine.prewarmScriptOps(script)
-    mem("  post-prewarm")
-    virtualMachine.installJit()
-    initBroJit(virtualMachine)
-    mem("  post-install")
   if getEnv("MEM_SKIP", "") == "interpret":
     return ""
   result = virtualMachine.interpret(script, mainChunk).stringVal[]
   mem("  post-interpret")
-  var a, b, c, d: int
-  jitDebugCounts(a, b, c, d)
-  echo "  census meta=" & $a & " strs=" & $b & " floats=" & $c & " live=" & $d &
-    " cachedAst=" & $codegen.codegenCache.cachedAst.len &
-    " ring=" & $jitRingOccupancy()
-  if getEnv("MEM_RINGTEST", "0") == "1":
-    jitClearRing()
-    GC_fullCollect()
-    mem("  post-ringclear-test")
+  echo "  cachedAst=" & $codegen.codegenCache.cachedAst.len
   if getEnv("MEM_COLLECT", "0") == "1":
     GC_fullCollect()
     mem("  post-collect")

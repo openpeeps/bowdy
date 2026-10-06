@@ -31,11 +31,6 @@ else:
   import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value, resolver]
   import ./bowdy/engine/parser
   import ./bowdy/engine/stdlib/[libsystem, libarrays, libcolors, libcss]
-  import ./bowdy/engine/jitbridge
-  # Same ordering rule as app/build: after the engine imports so voodoo
-  # registrations precede the JIT compilers' compilation.
-  from pkg/vancode/interpreter/jit/jit import installJit
-  from pkg/vancode/interpreter/jit/compiler_bridge import resetJitState
 
   type BroCompileResult* = object
     ## Outcome of a library compile: `css` on success, `error` otherwise.
@@ -56,12 +51,10 @@ else:
 
   proc runBroProgram(program: Ast, chunkName: string,
       parserCallback: ParserCallback, pretty: bool,
-      strict: bool = false, jit: bool = false): BroCompileResult =
+      strict: bool = false): BroCompileResult =
     ## Shared backend: register custom props, generate bytecode, interpret.
     ## Never quits; all failures surface as `ok == false` with `error` set.
-    ## `strict` enables the static CSS type system (off = VM/JIT types only).
-    ## `jit` opts into native main execution (default off: the interpreter
-    ## is faster for one-shot compiles; JIT pays off on repeated runs).
+    ## `strict` enables the static CSS type system (off = VM types only).
     let prevHandler = codegen.warnHandler
     let prevStrict = codegen.strictCss
     var collected: seq[string] = @[]
@@ -81,21 +74,7 @@ else:
       var gen = initCodeGen(script, module, mainChunk,
         manager = nil, parserCallback = parserCallback)
       gen.genScript(program, none(string))
-      let virtualMachine = newVirtualMachine(VMPreferences(
-        enableHotCodeDetection: jit,
-        hotProcThreshold: 10,
-        hotChunkThreshold: 1
-      ))
-      if jit:
-        # Register the main script (and its imports) for procId resolution:
-        # the JIT resolves CallD targets and admits call arities through
-        # `vm.importedModules`; without this every main-chunk CallD misses
-        # (nArgs=0, silent dummy result, native stack desync).
-        # Threshold 1: an explicit opt-in means native on this run.
-        resetJitState()
-        virtualMachine.prewarmScriptOps(script)
-        virtualMachine.installJit()
-        initBroJit(virtualMachine)
+      let virtualMachine = newVirtualMachine(VMPreferences())
       if pretty:
         virtualMachine.globals["__bro_pretty"] = initValue(true)
       result = BroCompileResult(ok: true,
@@ -113,20 +92,20 @@ else:
       codegen.strictCss = prevStrict
 
   proc compileStylesheet*(code: string, sourcePath = "input.bass",
-      pretty = false, strict = false, jit = false): BroCompileResult =
+      pretty = false, strict = false): BroCompileResult =
     ## Compile BASS `code` to CSS. Relative `import` statements resolve
     ## against the current working directory; use `compileStylesheetFile`
     ## when the entry lives on disk so sibling imports resolve next to it.
-    ## `strict` enables the static CSS type system (off = VM/JIT types only).
+    ## `strict` enables the static CSS type system (off = VM types only).
     var program: Ast
     try:
       parser.parseScript(program, code, sourcePath)
     except BroParserError as e:
       return BroCompileResult(ok: false, error: e.msg)
-    runBroProgram(program, sourcePath, nil, pretty, strict, jit)
+    runBroProgram(program, sourcePath, nil, pretty, strict)
 
   proc compileStylesheetFile*(path: string, pretty = false,
-      strict = false, jit = false): BroCompileResult =
+      strict = false): BroCompileResult =
     ## Compile the `.bass` file at `path` to CSS, resolving sibling imports.
     proc cb(astProgram: var Ast, p: string, resolver: FileResolver) =
       parser.parseScriptFile(astProgram, p)
@@ -139,4 +118,4 @@ else:
       return BroCompileResult(ok: false, error: e.msg)
     except IOError, OSError:
       return BroCompileResult(ok: false, error: getCurrentExceptionMsg())
-    runBroProgram(program, path, cb, pretty, strict, jit)
+    runBroProgram(program, path, cb, pretty, strict)

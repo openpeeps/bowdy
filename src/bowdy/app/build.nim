@@ -14,12 +14,6 @@ import pkg/vancode/interpreter/[ast, codegen, chunk, sym, vm, value, resolver, m
 import ../engine/parser
 import ../engine/sourcemap
 import ../engine/stdlib/[libsystem, libarrays, libcolors, libcss]
-# JIT import sits after the engine imports on purpose: vancodegen's voodoo
-# registrations must run before vancode's JIT compilers are compiled, so any
-# future `extendCaseStmt` JIT blocks in vancodegen apply to this build.
-from pkg/vancode/interpreter/jit/jit import installJit
-from pkg/vancode/interpreter/jit/compiler_bridge import resetJitState
-import ../engine/jitbridge
 
 var codegenWarnings: seq[string] = @[]
   ## Non-fatal codegen warnings collected during a compile, flushed with
@@ -128,23 +122,8 @@ proc compileCode(filePath: string,
                                   manager = manager, parserCallback = parserCallback)
     compiler.genScript(program, none(string))
     
-    # initialize a Voodoo VM and execute the script
-    # Hot detection and JIT live only in watch mode: each save rebuilds a
-    # fresh script, so procIds are per-save. resetJitState frees the
-    # previous save's native buffers (keeping one spare) and clears
-    # per-save caches, while the process-wide hot counts in vancode
-    # survive, letting main go native after hotChunkThreshold saves.
-    # One-shot runs stay interpreted for minimal latency.
-    let virtualMachine = newVirtualMachine(VMPreferences(
-      enableHotCodeDetection: watch,
-      hotProcThreshold: 10,
-      hotChunkThreshold: 2
-    ))
-    if watch:
-      resetJitState()
-      virtualMachine.prewarmScriptOps(script)
-      virtualMachine.installJit()
-      initBroJit(virtualMachine)
+    # initialize a Voodoo VM and execute the script (interpreted)
+    let virtualMachine = newVirtualMachine(VMPreferences())
     if pretty:
       virtualMachine.globals["__bro_pretty"] = initValue(true)
     if not output:

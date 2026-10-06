@@ -184,7 +184,7 @@ block extendCodeGen:
     ## dynamic values against property syntax (checkPropValueType, incl.
     ## var() registry checks and unknown-var warnings), static literal
     ## validation (cssValidateProp), and invalid-color errors. When false
-    ## only VM/JIT types apply (vancode vars, fn params, stdlib signatures);
+    ## only VM types apply (vancode vars, fn params, stdlib signatures);
     ## rendering (incl. named-color normalization) is identical either way.
     ## Set per compile by the CLI (`--strict`) or embed API.
     var rawPropMode = false ## when true, properties emit as raw text (for if/for inside rules)
@@ -590,7 +590,7 @@ block extendCodeGen:
       ## shapes stay legacy-lenient. Mismatched CSS value types are hard errors
       ## (e.g. `width: $colorVar` or `color: $lengthVar`). var() references
       ## check structurally against the custom-property registry first.
-      ## Runs only under `--strict`; otherwise VM/JIT types alone apply.
+      ## Runs only under `--strict`; otherwise VM types alone apply.
       if not strictCss: return
       if valTy == nil: return
       checkVarRefs(gen, key, errNode)
@@ -1587,8 +1587,8 @@ block extendVM:
     # a Voodoo injected snippet to initialize the `result` variable and the
     # source map segment accumulator (read back by the CLI after interpret)
     result = initValue("")
-    # JIT alias: native-compiled emit bridges append to the same output
-    # buffer via this globals ref (the JIT cannot see `result` itself).
+    # Output buffer alias: emit branches append to the same output
+    # buffer via this globals ref alongside `result`.
     vm.globals["__bro_output"] = result
     vm.globals["__bro_sourcemap_segments"] = initValue("")
     # pretty-printing state lives in vm.globals because extended case
@@ -1642,11 +1642,11 @@ block extendVM:
       let valueStr = co.getArg1Str(pcIdx, currentChunk)
       stack.push(initValue(valueStr))
     of opcEmitRaw:
-      # Shared implementation (also used by the JIT broEmitRaw bridge).
+      # Shared implementation (see `broEmitRawImpl` below).
       broEmitRawImpl(vm, result, stack.pop(), co.getArg1Int(pcIdx),
         co.arg2[pcIdx].int, currentChunk.file)
     of opcEmitCSS:
-      # Shared implementation (also used by the JIT broEmitCSS bridge).
+      # Shared implementation (see `broEmitCSSImpl` below).
       # Stack (bottom..top): kind int, selector string, props object.
       let cssProps = stack.pop()
       let cssSel = stack.pop()
@@ -1654,18 +1654,8 @@ block extendVM:
       broEmitCSSImpl(vm, result, cssKind, cssSel, cssProps,
         co.strKeys[pcIdx], currentChunk.file)
 
-block extendJitProcs:
-  # Shared emit implementations: the interpreter branches below call them,
-  # and the JIT emit bridges (bowdy/engine/jitbridge.nim) call the same
-  # procs, so native and interpreted emission cannot drift apart.
-
-  extendModule "vancode" / "interpreter" / "jit" / "host_emit.nim":
-    proc emitCssMeta*(cached: CachedOps, pc: int, ch: Chunk): int32 =
-      ## Pack an EmitCSS site: position pairs plus chunk file.
-      var poses: seq[int64] = @[]
-      for p in cached.strKeys[pc]:
-        poses.add(p.int64)
-      registerJitHostMeta(JitHostMeta(ints: poses, strs: @[ch.file]))
+block extendBroEmit:
+  # Shared emit implementations: the interpreter branches below call them.
 
   extendProc "interpreter/vm.nim":
     proc broEmitRawImpl*(vm: Vm, outBuf: Value, sv: Value, sl, sc: int, file: string) =
@@ -1838,93 +1828,3 @@ block extendJitProcs:
         vm.globals["__bro_indw"] = initValue((vm.globals["__bro_depth"].intVal.int * 2).int64)
         vm.globals["__bro_atline"] = initValue(true)
 
-block extendJit:
-  # JIT admission + emission for bowdy's opcodes and the string/object
-  # plumbing its chunks use. Injected branches resolve names at the vancode
-  # expansion site, so emission goes through vancode-owned host_emit
-  # one-liners; bowdy behavior arrives as registered host bridges.
-  extendCaseStmt "vmJitDynasmAllowCase":
-    case oc:
-    of opcPushS, opcPushF, opcPushG, opcPopG, opcConcatStr,
-       opcConstrArray, opcConstrObj,
-       opcPushSelector, opcPushProperty, opcPushValue, opcEmitCSS, opcEmitRaw:
-      result = true
-
-  extendCaseStmt "vmJitDynasmEmitCase":
-    case oc:
-    of opcPushS, opcPushValue:
-      if not emitConstPush(addr d, cached, pc, theProc.chunk, "broPushConst"):
-        return nil
-    of opcPushF:
-      if not emitFloatPush(addr d, cached, pc, theProc.chunk, "broPushFloat"):
-        return nil
-    of opcPushG:
-      if not emitGlobalPush(addr d, cached, pc, theProc.chunk, "broPushG"):
-        return nil
-    of opcPopG:
-      if not emitGlobalPop(addr d, cached, pc, theProc.chunk, "broPopG"):
-        return nil
-    of opcConcatStr:
-      let concatFn = findJitHostBridge("broConcatStr")
-      if concatFn == nil: return nil
-      vancode_bridge_2(addr d, concatFn)
-    of opcConstrArray:
-      if not emitHostCallValue(addr d, cached.getArg1Int(pc), "broConstrArray", 0):
-        return nil
-    of opcConstrObj:
-      if not emitHostCallValue(addr d, cached.getArg1Int(pc), "broConstrObj",
-          constrKeysMeta(cached, pc, theProc.chunk)):
-        return nil
-    of opcPushSelector:
-      # interpreter pushes kind first, name on top — same order here
-      vancode_push_i(addr d, cached.arg2[pc].cint)
-      if not emitConstPush(addr d, cached, pc, theProc.chunk, "broPushConst"):
-        return nil
-    of opcPushProperty:
-      discard # runtime no-op, mirrors the interpreter fallthrough
-    of opcEmitRaw:
-      if not emitHostCallVoid(addr d, 1, "broEmitRaw",
-          emitRawMeta(cached, pc, theProc.chunk)):
-        return nil
-    of opcEmitCSS:
-      if not emitHostCallVoid(addr d, 3, "broEmitCSS",
-          emitCssMeta(cached, pc, theProc.chunk)):
-        return nil
-
-  extendCaseStmt "vmJitTraceEmitCase":
-    # Dormant until the trace recorder admits host ops (it aborts on
-    # anything outside arithmetic/locals/jumps, so no trace can contain
-    # these yet). `opcPushG/PopG` are deliberately absent: the backend's
-    # own `discard` branches claim those labels.
-    case oc:
-    of opcPushS, opcPushValue:
-      if not emitConstPush(addr d, cached, pc, cast[Chunk](trace.chunk), "broPushConst"):
-        return nil
-    of opcPushF:
-      if not emitFloatPush(addr d, cached, pc, cast[Chunk](trace.chunk), "broPushFloat"):
-        return nil
-    of opcConcatStr:
-      let concatFn = findJitHostBridge("broConcatStr")
-      if concatFn == nil: return nil
-      vancode_bridge_2(addr d, concatFn)
-    of opcConstrArray:
-      if not emitHostCallValue(addr d, cached.getArg1Int(pc), "broConstrArray", 0):
-        return nil
-    of opcConstrObj:
-      if not emitHostCallValue(addr d, cached.getArg1Int(pc), "broConstrObj",
-          constrKeysMeta(cached, pc, cast[Chunk](trace.chunk))):
-        return nil
-    of opcPushSelector:
-      vancode_push_i(addr d, cached.arg2[pc].cint)
-      if not emitConstPush(addr d, cached, pc, cast[Chunk](trace.chunk), "broPushConst"):
-        return nil
-    of opcPushProperty:
-      discard
-    of opcEmitRaw:
-      if not emitHostCallVoid(addr d, 1, "broEmitRaw",
-          emitRawMeta(cached, pc, cast[Chunk](trace.chunk))):
-        return nil
-    of opcEmitCSS:
-      if not emitHostCallVoid(addr d, 3, "broEmitCSS",
-          emitCssMeta(cached, pc, cast[Chunk](trace.chunk))):
-        return nil

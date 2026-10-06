@@ -1407,7 +1407,7 @@ suite "Phase 6: typed var() references":
 
 proc compileLenient(code: string): tuple[css: string, warned: seq[string]] =
   ## compile() with the default `bowdy c` semantics: no static CSS type
-  ## system, VM/JIT types only, silent on unknown custom properties.
+  ## system, VM types only, silent on unknown custom properties.
   var program: Ast
   parser.parseScript(program, code, "test.bass")
   codegen.strictCss = false
